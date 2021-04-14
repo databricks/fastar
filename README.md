@@ -48,3 +48,22 @@ T1 starts immediately writing to stdout while T2-T4 save to an in-memory buffer 
 |    |    |    |    |    |              |
 +----+----+----+----+----+--------------+
 ```
+
+## Perf numbers
+These all use a lz4 compressed tarball of a container filesystem (2.6GB compressed, 4.3GB uncompressed), hosted on a ramFS local fileserver.
+Average of 3 runs taken.
+
+Download to /dev/null:
+|wget|fastar|
+---|---
+|1.34s|0.55s|
+
+Download + decompress to /dev/null (`wget | lz4` vs `fastar`):
+|wget+lz4|fastar|
+---|---
+|5.11s|3.45s|
+
+Download + decompress + extract to ramFS (`aria2c && tar` vs `wget | tar` vs `fastar | tar` vs `fastar -C`):
+|aria2c+tar|wget+tar|fastar+tar|fastar|
+---|---|---|---
+|0.00s|16.78s|11.02s|6.41s|
