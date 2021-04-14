@@ -49,6 +49,17 @@ T1 starts immediately writing to stdout while T2-T4 save to an in-memory buffer 
 +----+----+----+----+----+--------------+
 ```
 
+## Multithreaded tar extraction
+One final area for improvement is in the extraction of files from the final stream to the filesystem.
+Many people assume that storage is always slower than the cpu, however this isn't always the case.
+NVME ssds are often fast enough that the tar binary is actually the bottleneck when extracting data.
+Since tar extraction run in a single threaded hot loop, with fast storage this can actually become a bottleneck.
+
+To get around this, fastar has an option to do the file extraction internally (call `fastar -C` instead of piping to tar).
+When used, any time the next file to create in a tar stream is a regular file, fastar will copy the file data to a buffer which is then passed to a thread to write to disk in the background.
+Other file types (directories, etc) are still created inline to make sure that the folder structure required to create a file exists.
+This turns out to have a sizeable performance increase on suitably fast storage.
+
 ## Perf numbers
 These all use a lz4 compressed tarball of a container filesystem (2.6GB compressed, 4.3GB uncompressed), hosted on a ramFS local fileserver.
 Average of 3 runs taken.
@@ -63,7 +74,7 @@ Download + decompress to /dev/null (`wget | lz4` vs `fastar`):
 ---|---
 |5.11s|3.45s|
 
-Download + decompress + extract to ramFS (`aria2c && tar` vs `wget | tar` vs `fastar | tar` vs `fastar -C`):
+Download + decompress + extract to ramFS (`wget | tar` vs `aria2c && tar` vs `fastar | tar` vs `fastar -C`):
 |wget+tar|aria2c+tar|fastar+tar|fastar|
 ---|---|---|---
 |16.78s|13.38s|11.02s|6.41s|
