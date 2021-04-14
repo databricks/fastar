@@ -64,6 +64,6 @@ Download + decompress to /dev/null (`wget | lz4` vs `fastar`):
 |5.11s|3.45s|
 
 Download + decompress + extract to ramFS (`aria2c && tar` vs `wget | tar` vs `fastar | tar` vs `fastar -C`):
-|aria2c+tar|wget+tar|fastar+tar|fastar|
+|wget+tar|aria2c+tar|fastar+tar|fastar|
 ---|---|---|---
-|0.00s|16.78s|11.02s|6.41s|
+|16.78s|13.38s|11.02s|6.41s|
