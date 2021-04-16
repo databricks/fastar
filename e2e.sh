@@ -31,7 +31,7 @@ echo running fastar command
 ./fastar http://localhost:8000/image.tar.lz4 -C ~/fastar
 
 echo checking if results differ
-if diff --no-dereference -bur ~/tar ~/fastar; then
+if diff -bur ~/tar ~/fastar; then
   echo directories match
 else
   echo directories do not match

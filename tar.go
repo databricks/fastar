@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -31,8 +32,25 @@ func ExtractTar(stream io.Reader) {
 			log.Fatalf("ExtractTarGz: Next() failed: %s", err.Error())
 		}
 
-		path := filepath.Join(*outputDir, header.Name)
+		name := header.Name
+		linkName := header.Linkname
+		if *stripComponents != 0 {
+			name = filepath.Join(strings.Split(name, "/")[*stripComponents:]...)
+			if linkName != "" {
+				linkName = filepath.Join(strings.Split(linkName, "/")[*stripComponents:]...)
+			}
+		}
+		if name == "" {
+			continue
+		}
+		path := filepath.Join(*outputDir, name)
 		info := header.FileInfo()
+		pathDir, _ := filepath.Split(path)
+		if _, err = os.Stat(pathDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(pathDir, 0755); err != nil {
+				log.Fatalf("ExtractTarGz: Unspecified Mkdir() failed: %s", err.Error())
+			}
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -58,7 +76,7 @@ func ExtractTar(stream io.Reader) {
 			go writeFileAsync(path, buf, info, &wg)
 			// writeFile(path, tarReader, info)
 		case tar.TypeLink:
-			newPath := filepath.Join(*outputDir, header.Linkname)
+			newPath := filepath.Join(*outputDir, linkName)
 			if _, err = os.Stat(newPath); os.IsNotExist(err) {
 				file, err := os.Create(newPath)
 				if err != nil {
@@ -70,7 +88,7 @@ func ExtractTar(stream io.Reader) {
 				log.Fatal("Failed to hardlink: ", err.Error())
 			}
 		case tar.TypeSymlink:
-			if err = os.Symlink(header.Linkname, path); err != nil {
+			if err = os.Symlink(linkName, path); err != nil {
 				log.Fatal("Failed to symlink: ", err.Error())
 			}
 		default:
