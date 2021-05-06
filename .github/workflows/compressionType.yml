@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: E2E Test
+name: Compression Type Test
 
 # Controls when the action will run. 
 on:
@@ -24,11 +24,6 @@ jobs:
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v2
-        with:
-          lfs: true
-
-      - name: Checkout lfs objects
-        run: git lfs checkout
       
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -37,4 +32,4 @@ jobs:
 
       # Runs a single command using the runners shell
       - name: Run test
-        run: ./tests/e2e.sh
+        run: ./tests/compressionType.sh
