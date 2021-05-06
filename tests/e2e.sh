@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 ret=0
 
 echo building binaries
@@ -34,7 +32,7 @@ echo checking if results differ
 if diff -bur ~/tar ~/fastar; then
   echo directories match
 else
-  echo directories do not match
+  echo xxx directories do not match
   ret=1
 fi
 
