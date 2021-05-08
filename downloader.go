@@ -1,19 +1,45 @@
-package http
+package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-func GetDownloadStream(url string, chunkSize uint64, numWorkers int) (uint64, io.Reader) {
-	resp, err := http.Head(url)
-	if err != nil {
-		log.Fatal("Failed HEAD request for file size:", err.Error())
+type Downloader interface {
+	// Return the file size and if the server supports RANGE requests
+	GetFileInfo() (int64, bool)
+
+	// Return an io.Reader with the data in the specified ranges and the associated content length.
+	//
+	// ranges is an array where pairs of ints represent ranges of data to include.
+	// These pairs follow the convention of [x, y] means data[x] inclusive to data[y] exclusive.
+	//
+	// If ranges is empty, this will return an io.Reader for the contents of the entire file.
+	GetRanges(ranges []int64) (io.ReadCloser, int64)
+}
+
+func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
+	var downloader Downloader
+	if strings.HasPrefix(url, "s3") {
+		downloader = S3Downloader{url, s3.New(session.Must(session.NewSession()))}
+	} else {
+		downloader = HttpDownloader{url, &http.Client{}}
 	}
-	size := uint64(resp.ContentLength)
+	size, supportsRange := downloader.GetFileInfo()
+	if !supportsRange || size < 0 {
+		stream, _ := downloader.GetRanges([]int64{})
+		return stream
+	}
+	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size>>20, 10))
 
 	var chans []chan bool
 	for i := 0; i < numWorkers; i++ {
@@ -24,9 +50,9 @@ func GetDownloadStream(url string, chunkSize uint64, numWorkers int) (uint64, io
 
 	for i := 0; i < numWorkers; i++ {
 		go writePartial(
-			url,
+			downloader,
 			size,
-			uint64(i)*chunkSize,
+			int64(i)*chunkSize,
 			chunkSize,
 			numWorkers,
 			writer,
@@ -35,37 +61,29 @@ func GetDownloadStream(url string, chunkSize uint64, numWorkers int) (uint64, io
 			i)
 	}
 	chans[0] <- true
-	return size, reader
+	return reader
 }
 
 func writePartial(
-	url string,
-	size uint64,
-	start uint64,
-	chunkSize uint64,
+	downloader Downloader,
+	size int64,
+	start int64,
+	chunkSize int64,
 	numWorkers int,
 	writer *io.PipeWriter,
 	curChan chan bool,
 	nextChan chan bool,
 	idx int) {
 
-	client := &http.Client{}
+	var err error
 	buf := make([]byte, chunkSize)
 	r := bytes.NewReader(buf)
 	for {
 		if start >= size {
 			return
 		}
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			log.Fatal("Failed creating request:", err.Error())
-		}
-		req.Header.Add("Range", "bytes="+strconv.FormatUint(start, 10)+"-"+strconv.FormatUint(start+chunkSize-1, 10))
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Fatal("Failed get request:", err.Error())
-		}
-		defer resp.Body.Close()
+		chunk, contentLength := downloader.GetRanges([]int64{start, start + chunkSize})
+		defer chunk.Close()
 
 		// Read data off the wire and into an in memory buffer.
 		// If this is the first chunk of the file, no point in first
@@ -76,9 +94,12 @@ func writePartial(
 		// bottlenecked by resp.Body.Read() when copying to stdout.
 		if start > 0 {
 			totalRead := 0
-			for totalRead < int(resp.ContentLength) {
-				read, err := resp.Body.Read(buf[totalRead:])
-				if err != nil && err != io.EOF {
+			for totalRead < int(contentLength) {
+				read, err := chunk.Read(buf[totalRead:])
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
 					log.Fatal("Failed to read from resp:", err.Error())
 				}
 				totalRead += read
@@ -87,10 +108,10 @@ func writePartial(
 		// Only slice the buffer for the case of the leftover data.
 		// I saw a marginal slowdown when always slicing (even if
 		// the slice was of the whole buffer)
-		if resp.ContentLength == int64(chunkSize) {
+		if contentLength == chunkSize {
 			r.Reset(buf)
 		} else {
-			r.Reset(buf[:resp.ContentLength])
+			r.Reset(buf[:contentLength])
 		}
 
 		// Wait until previous worker finished before we start writing to stdout
@@ -98,7 +119,7 @@ func writePartial(
 		if start > 0 {
 			_, err = io.Copy(writer, r)
 		} else {
-			_, err = io.Copy(writer, resp.Body)
+			_, err = io.Copy(writer, chunk)
 		}
 		if err != nil {
 			log.Fatal("io copy failed:", err.Error())
@@ -112,6 +133,6 @@ func writePartial(
 		} else {
 			writer.Close()
 		}
-		start += (chunkSize * uint64(numWorkers))
+		start += (chunkSize * int64(numWorkers))
 	}
 }
