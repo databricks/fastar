@@ -32,7 +32,9 @@ func (httpDownloader HttpDownloader) GetRanges(ranges []int64) (io.ReadCloser, i
 			rangeString += ","
 		}
 	}
-	req.Header.Add("Range", rangeString)
+	if len(ranges) != 0 {
+		req.Header.Add("Range", rangeString)
+	}
 	resp, err := httpDownloader.client.Do(req)
 	if err != nil {
 		log.Fatal("Failed get request:", err.Error())
