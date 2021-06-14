@@ -75,7 +75,10 @@ func main() {
 	}
 
 	if *outputDir == "" {
-		io.Copy(os.Stdout, finalStream)
+		_, err := io.Copy(os.Stdout, finalStream)
+		if err != nil {
+			log.Fatal("Failed to write file to stdout: ", err.Error())
+		}
 	} else {
 		ExtractTar(finalStream)
 	}
@@ -90,6 +93,9 @@ func getMagicNumber(reader io.Reader) (string, io.Reader) {
 			log.Fatal("Failed to read magic number:", err.Error())
 		}
 		totalRead += read
+		if err == io.EOF {
+			return "", io.LimitReader(bytes.NewReader(buf[:totalRead]), int64(totalRead))
+		}
 	}
 	magicNumber := hex.EncodeToString(buf)
 	splicedStream := io.MultiReader(bytes.NewReader(buf), reader)

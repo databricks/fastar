@@ -35,7 +35,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 		downloader = HttpDownloader{url, &http.Client{}}
 	}
 	size, supportsRange := downloader.GetFileInfo()
-	if !supportsRange || size < 0 {
+	if !supportsRange || size < chunkSize {
 		stream, _ := downloader.GetRanges([]int64{})
 		return stream
 	}
