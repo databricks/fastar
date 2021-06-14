@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 )
@@ -17,7 +18,10 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool) {
 	if err != nil {
 		log.Fatal("Failed HEAD request for file size:", err.Error())
 	}
-	return resp.ContentLength, true
+	bound := int64(math.Max(0, float64(resp.ContentLength-1)))
+	_, size := httpDownloader.GetRanges([]int64{0, bound})
+	supportsRange := size == bound
+	return resp.ContentLength, supportsRange
 }
 
 func (httpDownloader HttpDownloader) GetRanges(ranges []int64) (io.ReadCloser, int64) {
