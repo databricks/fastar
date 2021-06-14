@@ -38,10 +38,18 @@ func (s3Downloader S3Downloader) GetRanges(ranges []int64) (io.ReadCloser, int64
 		}
 	}
 	bucket, key := getBucketAndKey(s3Downloader.Url)
-	params := &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-		Range:  aws.String(rangeString),
+	var params *s3.GetObjectInput
+	if len(ranges) != 0 {
+		params = &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+			Range:  aws.String(rangeString),
+		}
+	} else {
+		params = &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		}
 	}
 	req, resp := s3Downloader.svc.GetObjectRequest(params)
 	err := req.Send()
