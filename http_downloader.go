@@ -1,11 +1,15 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log"
 	"math"
 	"net/http"
 	"strconv"
+	"time"
+
+	"github.com/avast/retry-go"
 )
 
 type HttpDownloader struct {
@@ -14,13 +18,34 @@ type HttpDownloader struct {
 }
 
 func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool) {
-	resp, err := http.Head(httpDownloader.Url)
+	var resp *http.Response
+	err := retry.Do(
+		func() error {
+			curResp, err := http.Head(httpDownloader.Url)
+			if err != nil {
+				return err
+			}
+			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
+				return errors.New("non-200 response for HEAD request " + strconv.Itoa(curResp.StatusCode))
+			}
+			resp = curResp
+			return nil
+		},
+		retry.DelayType(retry.RandomDelay),
+		retry.MaxJitter(time.Second*time.Duration(*retryWait)),
+		retry.Attempts(uint(*retryCount)),
+	)
 	if err != nil {
 		log.Fatal("Failed HEAD request for file size:", err.Error())
 	}
-	bound := int64(math.Max(0, float64(resp.ContentLength-1)))
-	_, size := httpDownloader.GetRanges([]int64{0, bound})
-	supportsRange := size == bound
+	var supportsRange bool
+	if resp.ContentLength > 1 {
+		bound := int64(math.Max(0, float64(resp.ContentLength-1)))
+		_, size := httpDownloader.GetRanges([]int64{0, bound})
+		supportsRange = size == bound
+	} else {
+		supportsRange = false
+	}
 	return resp.ContentLength, supportsRange
 }
 
@@ -39,7 +64,23 @@ func (httpDownloader HttpDownloader) GetRanges(ranges []int64) (io.ReadCloser, i
 	if len(ranges) != 0 {
 		req.Header.Add("Range", rangeString)
 	}
-	resp, err := httpDownloader.client.Do(req)
+	var resp *http.Response
+	err = retry.Do(
+		func() error {
+			curResp, err := httpDownloader.client.Do(req)
+			if err != nil {
+				return err
+			}
+			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
+				return errors.New("non-200 response " + strconv.Itoa(curResp.StatusCode))
+			}
+			resp = curResp
+			return nil
+		},
+		retry.DelayType(retry.RandomDelay),
+		retry.MaxJitter(time.Second*time.Duration(*retryWait)),
+		retry.Attempts(uint(*retryCount)),
+	)
 	if err != nil {
 		log.Fatal("Failed get request:", err.Error())
 	}
