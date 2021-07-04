@@ -25,6 +25,8 @@ var (
 	writeWorkers    = kingpin.Flag("write-workers", "How many parallel workers to use to write file to disk").Default("8").Int()
 	stripComponents = kingpin.Flag("strip-components", "Strip STRIP-COMPONENTS leading components from file names on extraction").Int()
 	compression     = kingpin.Flag("compression", "Force specific compression schema instead of inferring from magic bytes and filename extension").Enum("tar", "gzip", "lz4")
+	retryCount      = kingpin.Flag("retry-count", "Max number of retries for a single chunk").Default("10").Int()
+	retryWait       = kingpin.Flag("retry-wait", "Max number of seconds to wait in between retries (with jitter)").Default("8").Int()
 )
 
 const (
