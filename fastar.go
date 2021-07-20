@@ -27,6 +27,7 @@ var (
 	compression     = kingpin.Flag("compression", "Force specific compression schema instead of inferring from magic bytes and filename extension").Enum("tar", "gzip", "lz4")
 	retryCount      = kingpin.Flag("retry-count", "Max number of retries for a single chunk").Default("10").Int()
 	retryWait       = kingpin.Flag("retry-wait", "Max number of seconds to wait in between retries (with jitter)").Default("8").Int()
+	ignoreNodeFiles = kingpin.Flag("ignore-node-files", "Don't throw errors on character or block device nodes").Default("false").Bool()
 )
 
 const (

@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -92,11 +93,20 @@ func ExtractTar(stream io.Reader) {
 				log.Fatal("Failed to symlink: ", err.Error())
 			}
 		default:
-			log.Fatal(
-				"ExtractTarGz: uknown type:",
-				header.Typeflag,
-				" in ",
-				header.Name)
+			if *ignoreNodeFiles {
+				fmt.Fprintln(
+					os.Stderr,
+					"ExtractTarGz: uknown type:",
+					header.Typeflag,
+					" in ",
+					header.Name)
+			} else {
+				log.Fatal(
+					"ExtractTarGz: uknown type:",
+					header.Typeflag,
+					" in ",
+					header.Name)
+			}
 		}
 	}
 	wg.Wait()
