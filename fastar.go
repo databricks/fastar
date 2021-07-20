@@ -28,6 +28,7 @@ var (
 	retryCount      = kingpin.Flag("retry-count", "Max number of retries for a single chunk").Default("10").Int()
 	retryWait       = kingpin.Flag("retry-wait", "Max number of seconds to wait in between retries (with jitter)").Default("8").Int()
 	ignoreNodeFiles = kingpin.Flag("ignore-node-files", "Don't throw errors on character or block device nodes").Default("false").Bool()
+	overwrite       = kingpin.Flag("overwrite", "Overwrite any existing files").Default("false").Bool()
 )
 
 const (
