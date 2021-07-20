@@ -15,6 +15,9 @@ import (
 
 var openFileTokens chan bool
 
+var l sync.Mutex
+var linkMap map[string]chan bool = make(map[string]chan bool)
+
 func ExtractTar(stream io.Reader) {
 	openFileTokens = make(chan bool, *writeWorkers)
 	tarReader := tar.NewReader(stream)
@@ -55,9 +58,6 @@ func ExtractTar(stream io.Reader) {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if _, err = os.Stat(path); os.IsExist(err) {
-				continue
-			}
 			if err := os.MkdirAll(path, info.Mode()); err != nil {
 				log.Fatalf("ExtractTarGz: Mkdir() failed: %s", err.Error())
 			}
@@ -75,20 +75,16 @@ func ExtractTar(stream io.Reader) {
 			<-openFileTokens
 			wg.Add(1)
 			go writeFileAsync(path, buf, info, &wg)
-			// writeFile(path, tarReader, info)
 		case tar.TypeLink:
 			newPath := filepath.Join(*outputDir, linkName)
-			if _, err = os.Stat(newPath); os.IsNotExist(err) {
-				file, err := os.Create(newPath)
-				if err != nil {
-					log.Fatal(err)
-				}
-				defer file.Close()
-			}
-			if err = os.Link(newPath, path); err != nil {
-				log.Fatal("Failed to hardlink: ", err.Error())
-			}
+			wg.Add(1)
+			go hardLinkAsync(newPath, path, &wg)
 		case tar.TypeSymlink:
+			if *overwrite {
+				if _, err := os.Lstat(path); err == nil {
+					os.Remove(path)
+				}
+			}
 			if err = os.Symlink(linkName, path); err != nil {
 				log.Fatal("Failed to symlink: ", err.Error())
 			}
@@ -112,34 +108,60 @@ func ExtractTar(stream io.Reader) {
 	wg.Wait()
 }
 
-func writeFile(filename string, tarReader *tar.Reader, info fs.FileInfo) {
-	// passing in info.Mode() here doesn't even create the file with Mode() bits???
-	// call os.Chmod afterwards with the same bits to fix this =_=
+func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer func() { openFileTokens <- true }()
+	if *overwrite {
+		if _, err := os.Stat(filename); err == nil {
+			os.Remove(filename)
+		}
+	}
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
 	if err != nil {
 		log.Fatal("Create file failed: ", err.Error())
 	}
 	defer os.Chmod(filename, info.Mode())
+	defer func() {
+		var c chan bool
+		l.Lock()
+		if _, exists := linkMap[filename]; !exists {
+			linkMap[filename] = make(chan bool, 1)
+		}
+		c = linkMap[filename]
+		l.Unlock()
+		c <- true
+	}()
 	defer file.Close()
-	_, err = io.Copy(file, tarReader)
+	_, err = io.Copy(file, bytes.NewReader(buf))
 	if err != nil {
 		log.Fatal("Copy file failed: ", err.Error())
 	}
 }
 
-func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.WaitGroup) {
+func hardLinkAsync(newPath string, path string, wg *sync.WaitGroup) {
 	defer wg.Done()
-	defer func() { openFileTokens <- true }()
-	// passing in info.Mode() here doesn't even create the file with Mode() bits???
-	// call os.Chmod afterwards with the same bits to fix this =_=
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
-	if err != nil {
-		log.Fatal("Create file failed: ", err.Error())
+	// If the file we're hard linking to doesn't exist yet,
+	// make a channel in the map for the file and wait on it
+	// until it's created.
+	var c chan bool
+	l.Lock()
+	if _, exists := linkMap[newPath]; !exists {
+		linkMap[newPath] = make(chan bool, 1)
 	}
-	defer os.Chmod(filename, info.Mode())
-	defer file.Close()
-	_, err = io.Copy(file, bytes.NewReader(buf))
-	if err != nil {
-		log.Fatal("Copy file failed: ", err.Error())
+	c = linkMap[newPath]
+	l.Unlock()
+	<-c
+	// Possible for multiple hard links to the same file, send a token
+	// back to the channel for any future workers that also need to
+	// link to it.
+	c <- true
+
+	if *overwrite {
+		if _, err := os.Stat(path); err == nil {
+			os.Remove(path)
+		}
+	}
+	if err := os.Link(newPath, path); err != nil {
+		log.Fatal("Failed to hardlink: ", err.Error())
 	}
 }
