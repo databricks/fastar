@@ -25,6 +25,9 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool) {
 			if err != nil {
 				return err
 			}
+			if curResp.StatusCode == 404 {
+				log.Fatal("404, file not found")
+			}
 			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
 				return errors.New("non-200 response for HEAD request " + strconv.Itoa(curResp.StatusCode))
 			}
