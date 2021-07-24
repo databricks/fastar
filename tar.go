@@ -15,9 +15,6 @@ import (
 
 var openFileTokens chan bool
 
-var l sync.Mutex
-var linkMap map[string]chan bool = make(map[string]chan bool)
-
 func ExtractTar(stream io.Reader) {
 	openFileTokens = make(chan bool, *writeWorkers)
 	tarReader := tar.NewReader(stream)
@@ -77,8 +74,7 @@ func ExtractTar(stream io.Reader) {
 			go writeFileAsync(path, buf, info, &wg)
 		case tar.TypeLink:
 			newPath := filepath.Join(*outputDir, linkName)
-			wg.Add(1)
-			go hardLinkAsync(newPath, path, &wg)
+			hardLinkAsync(newPath, path, &wg)
 		case tar.TypeSymlink:
 			if *overwrite {
 				if _, err := os.Lstat(path); err == nil {
@@ -121,16 +117,6 @@ func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.Wait
 		log.Fatal("Create file failed: ", err.Error())
 	}
 	defer os.Chmod(filename, info.Mode())
-	defer func() {
-		var c chan bool
-		l.Lock()
-		if _, exists := linkMap[filename]; !exists {
-			linkMap[filename] = make(chan bool, 1)
-		}
-		c = linkMap[filename]
-		l.Unlock()
-		c <- true
-	}()
 	defer file.Close()
 	_, err = io.Copy(file, bytes.NewReader(buf))
 	if err != nil {
@@ -139,22 +125,9 @@ func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.Wait
 }
 
 func hardLinkAsync(newPath string, path string, wg *sync.WaitGroup) {
-	defer wg.Done()
-	// If the file we're hard linking to doesn't exist yet,
-	// make a channel in the map for the file and wait on it
-	// until it's created.
-	var c chan bool
-	l.Lock()
-	if _, exists := linkMap[newPath]; !exists {
-		linkMap[newPath] = make(chan bool, 1)
-	}
-	c = linkMap[newPath]
-	l.Unlock()
-	<-c
-	// Possible for multiple hard links to the same file, send a token
-	// back to the channel for any future workers that also need to
-	// link to it.
-	c <- true
+	// Wait for all in progress files to finish in case one of them
+	// is what we need to hard link to
+	wg.Wait()
 
 	if *overwrite {
 		if _, err := os.Stat(path); err == nil {
