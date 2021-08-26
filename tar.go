@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -59,6 +58,7 @@ func ExtractTar(stream io.Reader) {
 				log.Fatalf("ExtractTarGz: Mkdir() failed: %s", err.Error())
 			}
 			os.Chmod(path, info.Mode())
+			os.Chown(path, header.Uid, header.Gid)
 		case tar.TypeReg:
 			buf := make([]byte, info.Size())
 			totalRead := 0
@@ -71,10 +71,10 @@ func ExtractTar(stream io.Reader) {
 			}
 			<-openFileTokens
 			wg.Add(1)
-			go writeFileAsync(path, buf, info, &wg)
+			go writeFileAsync(path, buf, header, &wg)
 		case tar.TypeLink:
 			newPath := filepath.Join(*outputDir, linkName)
-			hardLinkAsync(newPath, path, &wg)
+			hardLink(newPath, path, header, &wg)
 		case tar.TypeSymlink:
 			if *overwrite {
 				if _, err := os.Lstat(path); err == nil {
@@ -84,6 +84,7 @@ func ExtractTar(stream io.Reader) {
 			if err = os.Symlink(linkName, path); err != nil {
 				log.Fatal("Failed to symlink: ", err.Error())
 			}
+			os.Lchown(path, header.Uid, header.Gid)
 		default:
 			if *ignoreNodeFiles {
 				fmt.Fprintln(
@@ -104,7 +105,7 @@ func ExtractTar(stream io.Reader) {
 	wg.Wait()
 }
 
-func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.WaitGroup) {
+func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() { openFileTokens <- true }()
 	if *overwrite {
@@ -112,11 +113,12 @@ func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.Wait
 			os.Remove(filename)
 		}
 	}
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, header.FileInfo().Mode())
 	if err != nil {
 		log.Fatal("Create file failed: ", err.Error())
 	}
-	defer os.Chmod(filename, info.Mode())
+	defer os.Chmod(filename, header.FileInfo().Mode())
+	defer os.Chown(filename, header.Uid, header.Gid)
 	defer file.Close()
 	_, err = io.Copy(file, bytes.NewReader(buf))
 	if err != nil {
@@ -124,7 +126,7 @@ func writeFileAsync(filename string, buf []byte, info fs.FileInfo, wg *sync.Wait
 	}
 }
 
-func hardLinkAsync(newPath string, path string, wg *sync.WaitGroup) {
+func hardLink(newPath string, path string, header *tar.Header, wg *sync.WaitGroup) {
 	// Wait for all in progress files to finish in case one of them
 	// is what we need to hard link to
 	wg.Wait()
@@ -137,4 +139,5 @@ func hardLinkAsync(newPath string, path string, wg *sync.WaitGroup) {
 	if err := os.Link(newPath, path); err != nil {
 		log.Fatal("Failed to hardlink: ", err.Error())
 	}
+	os.Chown(path, header.Uid, header.Gid)
 }
