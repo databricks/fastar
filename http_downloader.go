@@ -18,10 +18,19 @@ type HttpDownloader struct {
 }
 
 func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool) {
+	req, err := http.NewRequest("GET", httpDownloader.Url, nil)
+	if err != nil {
+		log.Fatal("Failed creating GET request:", err.Error())
+	}
+	if len(*headers) > 0 {
+		for key, value := range *headers {
+			req.Header.Add(key, value)
+		}
+	}
 	var resp *http.Response
-	err := retry.Do(
+	err = retry.Do(
 		func() error {
-			curResp, err := http.Head(httpDownloader.Url)
+			curResp, err := httpDownloader.client.Do(req)
 			if err != nil {
 				return err
 			}
@@ -29,7 +38,7 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool) {
 				log.Fatal("404, file not found")
 			}
 			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
-				return errors.New("non-200 response for HEAD request " + strconv.Itoa(curResp.StatusCode))
+				return errors.New("non-200 response for GET request " + strconv.Itoa(curResp.StatusCode))
 			}
 			resp = curResp
 			return nil
@@ -55,7 +64,7 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool) {
 func (httpDownloader HttpDownloader) GetRanges(ranges []int64) (io.ReadCloser, int64) {
 	req, err := http.NewRequest("GET", httpDownloader.Url, nil)
 	if err != nil {
-		log.Fatal("Failed creating request:", err.Error())
+		log.Fatal("Failed creating GET request:", err.Error())
 	}
 	rangeString := "bytes="
 	for i := 0; i+1 < len(ranges); i += 2 {
@@ -66,6 +75,11 @@ func (httpDownloader HttpDownloader) GetRanges(ranges []int64) (io.ReadCloser, i
 	}
 	if len(ranges) != 0 {
 		req.Header.Add("Range", rangeString)
+	}
+	if len(*headers) > 0 {
+		for key, value := range *headers {
+			req.Header.Add(key, value)
+		}
 	}
 	var resp *http.Response
 	err = retry.Do(

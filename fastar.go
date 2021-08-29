@@ -29,6 +29,7 @@ var (
 	retryWait       = kingpin.Flag("retry-wait", "Max number of seconds to wait in between retries (with jitter)").Default("8").Int()
 	ignoreNodeFiles = kingpin.Flag("ignore-node-files", "Don't throw errors on character or block device nodes").Default("false").Bool()
 	overwrite       = kingpin.Flag("overwrite", "Overwrite any existing files").Default("false").Bool()
+	headers         = kingpin.Flag("headers", "Headers to use with http request").Short('H').PlaceHolder("HEADER:VALUE").StringMap()
 )
 
 const (
