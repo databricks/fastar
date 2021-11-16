@@ -90,13 +90,13 @@ func ExtractTar(stream io.Reader) {
 				fmt.Fprintln(
 					os.Stderr,
 					"ExtractTarGz: uknown type:",
-					header.Typeflag,
+					string(header.Typeflag),
 					" in ",
 					header.Name)
 			} else {
 				log.Fatal(
 					"ExtractTarGz: uknown type:",
-					header.Typeflag,
+					string(header.Typeflag),
 					" in ",
 					header.Name)
 			}
