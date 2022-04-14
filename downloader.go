@@ -6,11 +6,14 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
@@ -58,13 +61,22 @@ type Downloader interface {
 // RANGE requests or if the total file is smaller than a single download chunk.
 func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	var downloader Downloader
+	netTransport := &http.Transport{
+		Dial: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).Dial,
+		TLSHandshakeTimeout: 5 * time.Second,
+	}
+	httpClient := http.Client{
+		Transport: netTransport,
+	}
 	if strings.HasPrefix(url, "s3") {
-		downloader = S3Downloader{url, s3.New(session.Must(session.NewSession()))}
+		downloader = S3Downloader{url, s3.New(session.Must(session.NewSession(&aws.Config{HTTPClient: &httpClient})))}
 	} else {
-		downloader = HttpDownloader{url, &http.Client{}}
+		downloader = HttpDownloader{url, &httpClient}
 	}
 	size, supportsRange, supportsMultipart := downloader.GetFileInfo()
-	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size>>20, 10))
+	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
 	if !supportsRange || size < chunkSize {
 		return downloader.Get()
 	}
@@ -125,8 +137,7 @@ func writePartial(
 			ranges = append(ranges, curChunkStart, curChunkStart+chunkSize)
 			curChunkStart += (chunkSize * int64(numWorkers))
 		}
-		multiReader, err = downloader.GetRanges(ranges)
-		if err != nil {
+		if multiReader, err = downloader.GetRanges(ranges); err != nil {
 			log.Fatal("Failed to get ranges from file:", err.Error())
 		}
 	}
@@ -138,8 +149,7 @@ func writePartial(
 	var chunk io.ReadCloser
 	for curChunkStart < size {
 		if useMultipart {
-			multipartChunk, err = multiReader.NextPart()
-			if err != nil {
+			if multipartChunk, err = multiReader.NextPart(); err != nil {
 				log.Fatal("Error getting next multipart chunk:", err.Error())
 			}
 			defer multipartChunk.Close()
@@ -148,57 +158,66 @@ func writePartial(
 			defer chunk.Close()
 		}
 
-		// Read data off the wire and into an in memory buffer.
-		// If this is the first chunk of the file, no point in first
-		// reading it to a buffer before writing to stdout, we already need
-		// it *now*.
-		//
-		// For all other chunks, read them into an in memory buffer to greedily
-		// force the chunk to be read off the wire. Otherwise we'd still be
+		// Read data off the wire and into an in memory buffer to greedily
+		// force the chunk to be read. Otherwise we'd still be
 		// bottlenecked by resp.Body.Read() when copying to stdout.
 		//
 		// We explicitly use Read() rather than ReadAll() as this lets us use
 		// a static buffer of our choosing. ReadAll() allocates a new buffer
 		// for every single chunk, resulting in a ~30% slowdown.
-		if curChunkStart > 0 {
-			totalRead := 0
-			for {
-				var read int
-				if useMultipart {
-					read, err = multipartChunk.Read(buf[totalRead:])
-				} else {
-					read, err = chunk.Read(buf[totalRead:])
-				}
-				totalRead += read
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					log.Fatal("Failed to read from resp:", err.Error())
-				}
-			}
-			// Only slice the buffer for the case of the leftover data.
-			// I saw a marginal slowdown when always slicing (even if
-			// the slice was of the whole buffer)
-			if int64(totalRead) == chunkSize {
-				r.Reset(buf)
+		totalRead := 0
+		emptyReadCount := 0
+		slowReadCount := 0
+		startTime := time.Now()
+		for {
+			var read int
+			if useMultipart {
+				read, err = multipartChunk.Read(buf[totalRead:])
 			} else {
-				r.Reset(buf[:totalRead])
+				read, err = chunk.Read(buf[totalRead:])
 			}
+			// Make sure to handle bytes read before error handling,
+			// Read() can return bytes and EOF in the same call.
+			totalRead += read
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatal("Failed to read from resp:", err.Error())
+			}
+			// Fast fail for stalled downloads where we haven't read anything
+			// off the wire after multiple Read() calls.
+			if read == 0 && err == nil {
+				emptyReadCount++
+				if emptyReadCount == 100 {
+					log.Fatal("Too many empty reads from response, fast failing")
+				}
+			} else {
+				emptyReadCount = 0
+			}
+			// Fast fail if our average throughput is below the threshold after multiple Read() calls
+			if totalRead > 0 && (float64(totalRead)/float64(time.Since(startTime).Nanoseconds()) < minSpeedBytesPerNanosecond) {
+				slowReadCount++
+				if slowReadCount == 100 {
+					log.Fatalf("Average throughput slower than %sB/s, fast failing", *minSpeed)
+				}
+			} else {
+				slowReadCount = 0
+			}
+		}
+		// Only slice the buffer for the case of the leftover data.
+		// I saw a marginal slowdown when always slicing (even if
+		// the slice was of the whole buffer)
+		if int64(totalRead) == chunkSize {
+			r.Reset(buf)
+		} else {
+			r.Reset(buf[:totalRead])
 		}
 
-		// Wait until previous worker finished before we start writing to stdout
+		// Wait until previous worker finished before we start writing to stdout.
+		// They'll send a token through this channel when they're done.
 		<-curChan
-		if curChunkStart > 0 {
-			_, err = io.Copy(writer, r)
-		} else {
-			if useMultipart {
-				_, err = io.Copy(writer, multipartChunk)
-			} else {
-				_, err = io.Copy(writer, chunk)
-			}
-		}
-		if err != nil {
+		if _, err = io.Copy(writer, r); err != nil {
 			log.Fatal("io copy failed:", err.Error())
 		}
 		// Trigger next worker to start writing to stdout.
