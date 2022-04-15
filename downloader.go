@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,17 +15,38 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-type Downloader interface {
-	// Return the file size and if the server supports RANGE requests
-	GetFileInfo() (int64, bool)
+// Generate inclusive-inclusive range header string from the array
+// of indices passed to GetRanges().
+//
+// Returns garbage for empty ranges array.
+func GenerateRangeString(ranges []int64) string {
+	rangeString := "bytes="
+	for i := 0; i+1 < len(ranges); i += 2 {
+		rangeString += strconv.FormatInt(ranges[i], 10) + "-" + strconv.FormatInt(ranges[i+1]-1, 10)
+		if i+3 < len(ranges) {
+			rangeString += ","
+		}
+	}
+	return rangeString
+}
 
-	// Return an io.Reader with the data in the specified ranges and the associated content length.
+type Downloader interface {
+	// Return the file size, RANGE request support, and multipart RANGE request support.
+	GetFileInfo() (int64, bool, bool)
+
+	// Reader for the entire file.
+	Get() io.ReadCloser
+
+	// Return an io.Reader with the data in single specified range.
+	//
+	// start is inclusive and end is exclusive.
+	GetRange(start, end int64) io.ReadCloser
+
+	// Return a multipart.Reader with the data in the specified ranges and an error if failed.
 	//
 	// ranges is an array where pairs of ints represent ranges of data to include.
 	// These pairs follow the convention of [x, y] means data[x] inclusive to data[y] exclusive.
-	//
-	// If ranges is empty, this will return an io.Reader for the contents of the entire file.
-	GetRanges(ranges []int64) (io.ReadCloser, int64)
+	GetRanges(ranges []int64) (*multipart.Reader, error)
 }
 
 // Returns a single io.Reader byte stream that transparently makes use of parallel
@@ -41,12 +63,11 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	} else {
 		downloader = HttpDownloader{url, &http.Client{}}
 	}
-	size, supportsRange := downloader.GetFileInfo()
-	if !supportsRange || size < chunkSize {
-		stream, _ := downloader.GetRanges([]int64{})
-		return stream
-	}
+	size, supportsRange, supportsMultipart := downloader.GetFileInfo()
 	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size>>20, 10))
+	if !supportsRange || size < chunkSize {
+		return downloader.Get()
+	}
 
 	// Bool channels used to synchronize when workers write to the output stream.
 	// Each worker sleeps until a token is pushed to their channel by the previous
@@ -64,6 +85,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	for i := 0; i < numWorkers; i++ {
 		go writePartial(
 			downloader,
+			supportsMultipart,
 			size,
 			int64(i)*chunkSize,
 			chunkSize,
@@ -79,6 +101,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 // Individual worker thread entry function
 func writePartial(
 	downloader Downloader,
+	supportsMultipart bool,
 	size int64, // total file size
 	start int64, // the starting offset for the first chunk for this worker
 	chunkSize int64,
@@ -88,14 +111,41 @@ func writePartial(
 	nextChan chan bool) {
 
 	var err error
-	buf := make([]byte, chunkSize)
-	r := bytes.NewReader(buf)
-	for {
-		if start >= size {
-			return
+	var multiReader *multipart.Reader
+
+	// Don't use multipart if the current worker doesn't need it.
+	// Otherwise the response won't contain multipart boundary tokens
+	// and the reader object will break.
+	useMultipart := supportsMultipart && (start+chunkSize*int64(numWorkers) < size)
+
+	if useMultipart {
+		ranges := []int64{}
+		curChunkStart := start
+		for curChunkStart < size {
+			ranges = append(ranges, curChunkStart, curChunkStart+chunkSize)
+			curChunkStart += (chunkSize * int64(numWorkers))
 		}
-		chunk, contentLength := downloader.GetRanges([]int64{start, start + chunkSize})
-		defer chunk.Close()
+		multiReader, err = downloader.GetRanges(ranges)
+		if err != nil {
+			log.Fatal("Failed to get ranges from file:", err.Error())
+		}
+	}
+
+	curChunkStart := start
+	var r *bytes.Reader
+	var multipartChunk *multipart.Part
+	var chunk io.ReadCloser
+	for curChunkStart < size {
+		if useMultipart {
+			multipartChunk, err = multiReader.NextPart()
+			if err != nil {
+				log.Fatal("Error getting next multipart chunk:", err.Error())
+			}
+			defer multipartChunk.Close()
+		} else {
+			chunk = downloader.GetRange(curChunkStart, curChunkStart+chunkSize)
+			defer chunk.Close()
+		}
 
 		// Read data off the wire and into an in memory buffer.
 		// If this is the first chunk of the file, no point in first
@@ -104,34 +154,29 @@ func writePartial(
 		// For all other chunks, read them into an in memory buffer to greedily
 		// force the chunk to be read off the wire. Otherwise we'd still be
 		// bottlenecked by resp.Body.Read() when copying to stdout.
-		if start > 0 {
-			totalRead := 0
-			for totalRead < int(contentLength) {
-				read, err := chunk.Read(buf[totalRead:])
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					log.Fatal("Failed to read from resp:", err.Error())
-				}
-				totalRead += read
+		if curChunkStart > 0 {
+			var buf []byte
+			if useMultipart {
+				buf, err = io.ReadAll(multipartChunk)
+			} else {
+				buf, err = io.ReadAll(chunk)
 			}
-		}
-		// Only slice the buffer for the case of the leftover data.
-		// I saw a marginal slowdown when always slicing (even if
-		// the slice was of the whole buffer)
-		if contentLength == chunkSize {
-			r.Reset(buf)
-		} else {
-			r.Reset(buf[:contentLength])
+			if err != nil {
+				log.Fatal("Failed to read chunk:", err.Error())
+			}
+			r = bytes.NewReader(buf)
 		}
 
 		// Wait until previous worker finished before we start writing to stdout
 		<-curChan
-		if start > 0 {
+		if curChunkStart > 0 {
 			_, err = io.Copy(writer, r)
 		} else {
-			_, err = io.Copy(writer, chunk)
+			if useMultipart {
+				_, err = io.Copy(writer, multipartChunk)
+			} else {
+				_, err = io.Copy(writer, chunk)
+			}
 		}
 		if err != nil {
 			log.Fatal("io copy failed:", err.Error())
@@ -140,11 +185,11 @@ func writePartial(
 		// Only send token if next worker has more work to do,
 		// otherwise they already exited and won't be waiting
 		// for a token.
-		if start+chunkSize < size {
+		if curChunkStart+chunkSize < size {
 			nextChan <- true
 		} else {
 			writer.Close()
 		}
-		start += (chunkSize * int64(numWorkers))
+		curChunkStart += (chunkSize * int64(numWorkers))
 	}
 }

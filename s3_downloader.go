@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log"
-	"strconv"
+	"mime/multipart"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
@@ -15,48 +17,50 @@ type S3Downloader struct {
 	svc *s3.S3
 }
 
-func (s3Downloader S3Downloader) GetFileInfo() (int64, bool) {
+func (s3Downloader S3Downloader) GetFileInfo() (int64, bool, bool) {
+	req, resp := s3Downloader.generateRequestResponse(nil)
+	err := req.Send()
+	if err != nil {
+		log.Fatal("AWS request failed: ", err.Error())
+	}
+	return *resp.ContentLength, true, false
+}
+
+func (s3Downloader S3Downloader) Get() io.ReadCloser {
+	req, resp := s3Downloader.generateRequestResponse(nil)
+	err := req.Send()
+	if err != nil {
+		log.Fatal("AWS request failed: ", err.Error())
+	}
+	return resp.Body
+}
+
+func (s3Downloader S3Downloader) GetRange(start, end int64) io.ReadCloser {
+	rangeString := GenerateRangeString([]int64{start, end})
+	req, resp := s3Downloader.generateRequestResponse(&rangeString)
+	err := req.Send()
+	if err != nil {
+		log.Fatal("AWS request failed: ", err.Error())
+	}
+	return resp.Body
+}
+
+// S3 doesn't support multipart range requests right now, so this will never be used
+// for actual file download. Still here for when they eventually do support it though.
+func (s3Downloader S3Downloader) GetRanges(ranges []int64) (*multipart.Reader, error) {
+	return nil, errors.New("multipart range requests not supported by S3")
+}
+
+func (s3Downloader S3Downloader) generateRequestResponse(rangeString *string) (*request.Request, *s3.GetObjectOutput) {
 	bucket, key := getBucketAndKey(s3Downloader.Url)
 	params := &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	}
-	req, resp := s3Downloader.svc.GetObjectRequest(params)
-	err := req.Send()
-	if err != nil {
-		log.Fatal("AWS request failed: ", err.Error())
+	if rangeString != nil {
+		params.Range = aws.String(*rangeString)
 	}
-	return *resp.ContentLength, true
-}
-
-func (s3Downloader S3Downloader) GetRanges(ranges []int64) (io.ReadCloser, int64) {
-	rangeString := "bytes="
-	for i := 0; i+1 < len(ranges); i += 2 {
-		rangeString += strconv.FormatInt(ranges[i], 10) + "-" + strconv.FormatInt(ranges[i+1]-1, 10)
-		if i+3 < len(ranges) {
-			rangeString += ","
-		}
-	}
-	bucket, key := getBucketAndKey(s3Downloader.Url)
-	var params *s3.GetObjectInput
-	if len(ranges) != 0 {
-		params = &s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-			Range:  aws.String(rangeString),
-		}
-	} else {
-		params = &s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-		}
-	}
-	req, resp := s3Downloader.svc.GetObjectRequest(params)
-	err := req.Send()
-	if err != nil {
-		log.Fatal("AWS request failed: ", err.Error())
-	}
-	return resp.Body, *resp.ContentLength
+	return s3Downloader.svc.GetObjectRequest(params)
 }
 
 func getBucketAndKey(url string) (string, string) {
