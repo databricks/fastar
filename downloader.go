@@ -132,7 +132,8 @@ func writePartial(
 	}
 
 	curChunkStart := start
-	var r *bytes.Reader
+	buf := make([]byte, chunkSize)
+	r := bytes.NewReader(buf)
 	var multipartChunk *multipart.Part
 	var chunk io.ReadCloser
 	for curChunkStart < size {
@@ -151,20 +152,39 @@ func writePartial(
 		// If this is the first chunk of the file, no point in first
 		// reading it to a buffer before writing to stdout, we already need
 		// it *now*.
+		//
 		// For all other chunks, read them into an in memory buffer to greedily
 		// force the chunk to be read off the wire. Otherwise we'd still be
 		// bottlenecked by resp.Body.Read() when copying to stdout.
+		//
+		// We explicitly use Read() rather than ReadAll() as this lets us use
+		// a static buffer of our choosing. ReadAll() allocates a new buffer
+		// for every single chunk, resulting in a ~30% slowdown.
 		if curChunkStart > 0 {
-			var buf []byte
-			if useMultipart {
-				buf, err = io.ReadAll(multipartChunk)
+			totalRead := 0
+			for {
+				var read int
+				if useMultipart {
+					read, err = multipartChunk.Read(buf[totalRead:])
+				} else {
+					read, err = chunk.Read(buf[totalRead:])
+				}
+				totalRead += read
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					log.Fatal("Failed to read from resp:", err.Error())
+				}
+			}
+			// Only slice the buffer for the case of the leftover data.
+			// I saw a marginal slowdown when always slicing (even if
+			// the slice was of the whole buffer)
+			if int64(totalRead) == chunkSize {
+				r.Reset(buf)
 			} else {
-				buf, err = io.ReadAll(chunk)
+				r.Reset(buf[:totalRead])
 			}
-			if err != nil {
-				log.Fatal("Failed to read chunk:", err.Error())
-			}
-			r = bytes.NewReader(buf)
 		}
 
 		// Wait until previous worker finished before we start writing to stdout
