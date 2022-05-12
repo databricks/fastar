@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"golang.org/x/sys/unix"
 )
 
 // Generate inclusive-inclusive range header string from the array
@@ -190,7 +191,8 @@ func writePartial(
 			if read == 0 && err == nil {
 				emptyReadCount++
 				if emptyReadCount == 100 {
-					log.Fatal("Too many empty reads from response, fast failing")
+					fmt.Fprintln(os.Stderr, "Too many empty reads from response, fast failing")
+					os.Exit(int(unix.EIO))
 				}
 			} else {
 				emptyReadCount = 0
@@ -199,7 +201,8 @@ func writePartial(
 			if totalRead > 0 && (float64(totalRead)/float64(time.Since(startTime).Nanoseconds()) < minSpeedBytesPerNanosecond) {
 				slowReadCount++
 				if slowReadCount == 100 {
-					log.Fatalf("Average throughput slower than %sB/s, fast failing", *minSpeed)
+					fmt.Fprintf(os.Stderr, "Average throughput slower than %sB/s, fast failing\n", *minSpeed)
+					os.Exit(int(unix.EIO))
 				}
 			} else {
 				slowReadCount = 0
