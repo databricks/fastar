@@ -64,9 +64,9 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	var downloader Downloader
 	netTransport := &http.Transport{
 		Dial: (&net.Dialer{
-			Timeout: 5 * time.Second,
+			Timeout: time.Duration(*connTimeout) * time.Second,
 		}).Dial,
-		TLSHandshakeTimeout: 5 * time.Second,
+		TLSHandshakeTimeout: time.Duration(*connTimeout) * time.Second,
 	}
 	httpClient := http.Client{
 		Transport: netTransport,
