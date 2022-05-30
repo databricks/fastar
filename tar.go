@@ -76,14 +76,9 @@ func ExtractTar(stream io.Reader) {
 		case tar.TypeReg:
 			// Read file contents into a buffer to pass along to background
 			// writer thread.
-			buf := make([]byte, info.Size())
-			totalRead := 0
-			for totalRead < int(info.Size()) {
-				read, err := tarReader.Read(buf[totalRead:])
-				if err != nil && err != io.EOF {
-					log.Fatal("Failed to read from resp:", err.Error())
-				}
-				totalRead += read
+			buf, err := io.ReadAll(tarReader)
+			if err != nil {
+				log.Fatal("Failed to read from resp:", err.Error())
 			}
 			<-openFileTokens
 			wg.Add(1)
