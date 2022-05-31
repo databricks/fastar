@@ -21,7 +21,8 @@ var (
 	rawUrl          = kingpin.Arg("url", "URL to download from").Required().String()
 	numWorkers      = kingpin.Flag("download-workers", "How many parallel workers to download the file").Default("8").Int()
 	chunkSize       = kingpin.Flag("chunk-size", "Size of file chunks (in MB) to pull in parallel").Default("50").Int64()
-	outputDir       = kingpin.Flag("directory", "Directory to extract tarball to. Dumps file to stdout if not specified.").Short('C').ExistingDir()
+	outputDir       = kingpin.Flag("directory", "Directory to extract tarball to. Defaults to current dir if not specified.").Short('C').ExistingDir()
+	toStdout        = kingpin.Flag("to-stdout", "Dump downloaded file to stdout rather than extracting to disk").Default("false").Short('O').Bool()
 	writeWorkers    = kingpin.Flag("write-workers", "How many parallel workers to use to write file to disk").Default("8").Int()
 	stripComponents = kingpin.Flag("strip-components", "Strip STRIP-COMPONENTS leading components from file names on extraction").Int()
 	compression     = kingpin.Flag("compression", "Force specific compression schema instead of inferring from magic bytes and filename extension (tar, gzip, or lz4)").Enum("tar", "gzip", "lz4")
@@ -88,12 +89,16 @@ func main() {
 		log.Fatal("CompressionType not set, should be impossible")
 	}
 
-	if *outputDir == "" {
-		_, err := io.Copy(os.Stdout, finalStream)
-		if err != nil {
+	if *toStdout {
+		if _, err := io.Copy(os.Stdout, finalStream); err != nil {
 			log.Fatal("Failed to write file to stdout: ", err.Error())
 		}
 	} else {
+		if *outputDir == "" {
+			if *outputDir, err = os.Getwd(); err != nil {
+				log.Fatal("Failed to get current working directory: ", err.Error())
+			}
+		}
 		ExtractTar(finalStream)
 	}
 }

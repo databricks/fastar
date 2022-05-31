@@ -22,7 +22,7 @@ do
     rm -rf /tmp/source
     rm -rf /tmp/download
     dd if=/dev/urandom of=/tmp/source bs=1 count=$fileSize
-    ./fastar http://localhost:8000/source --chunk-size 1 --download-workers 4 > /tmp/download
+    ./fastar http://localhost:8000/source --chunk-size 1 --download-workers 4 -O > /tmp/download
     if diff /tmp/source /tmp/download; then
         echo files match
     else
