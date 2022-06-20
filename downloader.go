@@ -8,7 +8,9 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	urlpkg "net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -56,11 +58,23 @@ type Downloader interface {
 // Returns a single io.Reader byte stream that transparently makes use of parallel
 // workers to speed up download.
 //
+// Also returns the bare filename for the download, (empty string if reading stdin)
+//
 // Infers s3 vs http download source by the url (should I include a flag to force this?)
 //
 // Will fall back to a single download stream if the download source doesn't support
 // RANGE requests or if the total file is smaller than a single download chunk.
-func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
+func GetDownloadStream(url string, chunkSize int64, numWorkers int) (io.Reader, string) {
+	if url == "-" {
+		return os.Stdin, ""
+	}
+
+	parsedUrl, err := urlpkg.Parse(url)
+	if err != nil {
+		log.Fatal("Failed to parse url: ", err.Error())
+	}
+	filename := path.Base(parsedUrl.Path)
+
 	var downloader Downloader
 	netTransport := &http.Transport{
 		Dial: (&net.Dialer{
@@ -79,7 +93,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	size, supportsRange, supportsMultipart := downloader.GetFileInfo()
 	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
 	if !supportsRange || size < chunkSize {
-		return downloader.Get()
+		return downloader.Get(), filename
 	}
 
 	// Bool channels used to synchronize when workers write to the output stream.
@@ -108,7 +122,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 			chans[(i+1)%numWorkers])
 	}
 	chans[0] <- true
-	return reader
+	return reader, filename
 }
 
 // Individual worker thread entry function
