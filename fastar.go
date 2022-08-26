@@ -34,7 +34,7 @@ var (
 	overwrite       = kingpin.Flag("overwrite", "Overwrite any existing files").Default("false").Bool()
 	headers         = kingpin.Flag("headers", "Headers to use with http request").Short('H').PlaceHolder("HEADER:VALUE").StringMap()
 
-	minSpeedBytesPerNanosecond = 0.0
+	minSpeedBytesPerMillisecond = 0.0
 )
 
 // Magic byte sequences prepended to the start of every gzip or lz4
@@ -185,5 +185,5 @@ func processMinSpeedFlag() {
 			log.Fatal("Failed to parse min speed argument", minSpeed, err.Error())
 		}
 	}
-	minSpeedBytesPerNanosecond = float64(bytesPerSecond) / 1e9
+	minSpeedBytesPerMillisecond = float64(bytesPerSecond) / 1e3
 }

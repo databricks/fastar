@@ -29,6 +29,7 @@ do
         echo xxx files do not match
         ret=1
     fi
+    echo 
 done
 
 echo killing fileserver...

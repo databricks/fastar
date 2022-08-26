@@ -24,7 +24,7 @@ import (
 //
 // Returns garbage for empty ranges array.
 func GenerateRangeString(ranges []int64) string {
-	rangeString := "bytes="
+	var rangeString = "bytes="
 	for i := 0; i+1 < len(ranges); i += 2 {
 		rangeString += strconv.FormatInt(ranges[i], 10) + "-" + strconv.FormatInt(ranges[i+1]-1, 10)
 		if i+3 < len(ranges) {
@@ -62,13 +62,13 @@ type Downloader interface {
 // RANGE requests or if the total file is smaller than a single download chunk.
 func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	var downloader Downloader
-	netTransport := &http.Transport{
+	var netTransport = &http.Transport{
 		Dial: (&net.Dialer{
 			Timeout: time.Duration(*connTimeout) * time.Second,
 		}).Dial,
 		TLSHandshakeTimeout: time.Duration(*connTimeout) * time.Second,
 	}
-	httpClient := http.Client{
+	var httpClient = http.Client{
 		Transport: netTransport,
 	}
 	if strings.HasPrefix(url, "s3") {
@@ -76,7 +76,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	} else {
 		downloader = HttpDownloader{url, &httpClient}
 	}
-	size, supportsRange, supportsMultipart := downloader.GetFileInfo()
+	var size, supportsRange, supportsMultipart = downloader.GetFileInfo()
 	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
 	if !supportsRange || size < chunkSize {
 		return downloader.Get()
@@ -93,7 +93,7 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 
 	// All workers share a single writer pipe, the reader side is used by the
 	// eventual consumer.
-	reader, writer := io.Pipe()
+	var reader, writer = io.Pipe()
 
 	for i := 0; i < numWorkers; i++ {
 		go writePartial(
@@ -126,38 +126,35 @@ func writePartial(
 	var err error
 	var multiReader *multipart.Reader
 
-	// Don't use multipart if the current worker doesn't need it.
+	// Don't use multipart if the current worker is too small to need it.
 	// Otherwise the response won't contain multipart boundary tokens
 	// and the reader object will break.
-	useMultipart := supportsMultipart && (start+chunkSize*int64(numWorkers) < size)
+	// This variable can be changed later on if we need to reset a connection
+	// due to a slow stream and our remaining download is now too small for multipart.
+	//
+	// TODO: find some way to make this cleaner... branching logic everywhere for single
+	// range vs multipart is ugly af
+	var useMultipart = supportsMultipart && (start+chunkSize*int64(numWorkers) < size)
 
-	if useMultipart {
-		ranges := []int64{}
-		curChunkStart := start
-		for curChunkStart < size {
-			ranges = append(ranges, curChunkStart, curChunkStart+chunkSize)
-			curChunkStart += (chunkSize * int64(numWorkers))
-		}
-		if multiReader, err = downloader.GetRanges(ranges); err != nil {
-			log.Fatal("Failed to get ranges from file:", err.Error())
-		}
-	}
-
-	curChunkStart := start
-	buf := make([]byte, chunkSize)
-	r := bytes.NewReader(buf)
+	// Readers used for either multipart or single range reading
 	var multipartChunk *multipart.Part
 	var chunk io.ReadCloser
+
+	// Keep track of how many times we've tried to connect to download server for current chunk.
+	// Used for limiting retries on slow/stalled network connections.
+	var attemptNumber = 1
+	var maxTimeForChunkMilli = float64(chunkSize) / minSpeedBytesPerMillisecond
+
+	multiReader = getMultipartReader(&downloader, start, chunkSize, size, numWorkers, useMultipart)
+
+	// Which chunk of the overall file are we reading right now
+	var curChunkStart = start
+	// In memory buffer for caching our chunk until it's our turn to write to pipe
+	var buf = make([]byte, chunkSize)
+	var r = bytes.NewReader(buf)
 	for curChunkStart < size {
-		if useMultipart {
-			if multipartChunk, err = multiReader.NextPart(); err != nil {
-				log.Fatal("Error getting next multipart chunk:", err.Error())
-			}
-			defer multipartChunk.Close()
-		} else {
-			chunk = downloader.GetRange(curChunkStart, curChunkStart+chunkSize)
-			defer chunk.Close()
-		}
+
+		multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, useMultipart)
 
 		// Read data off the wire and into an in memory buffer to greedily
 		// force the chunk to be read. Otherwise we'd still be
@@ -166,49 +163,52 @@ func writePartial(
 		// We explicitly use Read() rather than ReadAll() as this lets us use
 		// a static buffer of our choosing. ReadAll() allocates a new buffer
 		// for every single chunk, resulting in a ~30% slowdown.
-		totalRead := 0
-		emptyReadCount := 0
-		slowReadCount := 0
-		startTime := time.Now()
+		var totalRead = 0
+		var startTime = time.Now()
 		for {
 			var read int
 			if useMultipart {
 				read, err = multipartChunk.Read(buf[totalRead:])
 			} else {
+				// When not using multipart, every new chunk is a new network connection so reset attemptNumber
+				attemptNumber = 1
 				read, err = chunk.Read(buf[totalRead:])
 			}
-			// Make sure to handle bytes read before error handling,
-			// Read() can return bytes and EOF in the same call.
+			// Make sure to handle bytes read before error handling, Read() can return bytes and EOF in the same call.
 			totalRead += read
 			if err == io.EOF {
+				if useMultipart {
+					multipartChunk.Close()
+				} else {
+					chunk.Close()
+				}
 				break
 			}
 			if err != nil {
 				log.Fatal("Failed to read from resp:", err.Error())
 			}
-			// Fast fail for stalled downloads where we haven't read anything
-			// off the wire after multiple Read() calls.
-			if read == 0 && err == nil {
-				emptyReadCount++
-				if emptyReadCount == 100 {
-					fmt.Fprintln(os.Stderr, "Too many empty reads from response, fast failing")
+			var elapsedMilli = float64(time.Since(startTime).Milliseconds())
+			// For accurately enforcing very high min speeds, check if the entire chunk is done in time
+			var chunkTimedOut = elapsedMilli > maxTimeForChunkMilli
+			// For enforcing very low min speeds in a reasonable amount of time, verify we're meeting the min speed
+			// after a second.
+			var chunkTooSlowSoFar = elapsedMilli > 1000 && float64(totalRead)/elapsedMilli < minSpeedBytesPerMillisecond
+			if chunkTimedOut || chunkTooSlowSoFar {
+				if attemptNumber > *retryCount {
+					fmt.Fprintln(os.Stderr, "Too many slow/stalled connections for this chunk, giving up.")
 					os.Exit(int(unix.EIO))
 				}
-			} else {
-				emptyReadCount = 0
-			}
-			// Fast fail if our average throughput is below the threshold after multiple Read() calls
-			if totalRead > 0 && (float64(totalRead)/float64(time.Since(startTime).Nanoseconds()) < minSpeedBytesPerNanosecond) {
-				slowReadCount++
-				if slowReadCount == 100 {
-					fmt.Fprintf(os.Stderr, "Average throughput slower than %sB/s, fast failing\n", *minSpeed)
-					os.Exit(int(unix.EIO))
-				}
-			} else {
-				slowReadCount = 0
+				fmt.Fprintln(os.Stderr, "Timed out on current chunk, resetting connection")
+				// Reset useMultipart in case we're now far enough in the file that we can't use it anymore.
+				useMultipart = supportsMultipart && (curChunkStart+chunkSize*int64(numWorkers) < size)
+				multiReader = getMultipartReader(&downloader, curChunkStart, chunkSize, size, numWorkers, useMultipart)
+				multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, useMultipart)
+				totalRead = 0
+				startTime = time.Now()
+				attemptNumber++
 			}
 		}
-		// Only slice the buffer for the case of the leftover data.
+		// Only slice the buffer if not completely full.
 		// I saw a marginal slowdown when always slicing (even if
 		// the slice was of the whole buffer)
 		if int64(totalRead) == chunkSize {
@@ -233,5 +233,46 @@ func writePartial(
 			writer.Close()
 		}
 		curChunkStart += (chunkSize * int64(numWorkers))
+	}
+}
+
+func getMultipartReader(
+	downloader *Downloader,
+	start int64,
+	chunkSize int64,
+	size int64,
+	numWorkers int,
+	useMultipart bool) *multipart.Reader {
+	if !useMultipart {
+		return nil
+	}
+	var ranges = []int64{}
+	var curChunkStart = start
+	for curChunkStart < size {
+		ranges = append(ranges, curChunkStart, curChunkStart+chunkSize)
+		curChunkStart += (chunkSize * int64(numWorkers))
+	}
+	var reader, err = (*downloader).GetRanges(ranges)
+	if err != nil {
+		log.Fatal("Failed to get ranges from file:", err.Error())
+	}
+	return reader
+}
+
+// Callers must remember to call reader.Close()
+func getNextChunk(
+	downloader *Downloader,
+	multiReader *multipart.Reader,
+	start int64,
+	chunkSize int64,
+	useMultipart bool) (*multipart.Part, io.ReadCloser) {
+	if useMultipart {
+		var multipartChunk, err = multiReader.NextPart()
+		if err != nil {
+			log.Fatal("Error getting next multipart chunk:", err.Error())
+		}
+		return multipartChunk, nil
+	} else {
+		return nil, (*downloader).GetRange(start, start+chunkSize)
 	}
 }
