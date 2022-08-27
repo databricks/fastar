@@ -125,6 +125,7 @@ func writePartial(
 
 	var err error
 	var multiReader *multipart.Reader
+	var workerNum = start / chunkSize
 
 	// Don't use multipart if the current worker is too small to need it.
 	// Otherwise the response won't contain multipart boundary tokens
@@ -149,6 +150,10 @@ func writePartial(
 
 	// Which chunk of the overall file are we reading right now
 	var curChunkStart = start
+	// Used for logging periodic download speed stats
+	var timeDownloadingMilli = float64(0)
+	var totalDownloaded = float64(0)
+	var lastLogTime = time.Now()
 	// In memory buffer for caching our chunk until it's our turn to write to pipe
 	var buf = make([]byte, chunkSize)
 	var r = bytes.NewReader(buf)
@@ -164,7 +169,7 @@ func writePartial(
 		// a static buffer of our choosing. ReadAll() allocates a new buffer
 		// for every single chunk, resulting in a ~30% slowdown.
 		var totalRead = 0
-		var startTime = time.Now()
+		var chunkStartTime = time.Now()
 		for {
 			var read int
 			if useMultipart {
@@ -176,6 +181,7 @@ func writePartial(
 			}
 			// Make sure to handle bytes read before error handling, Read() can return bytes and EOF in the same call.
 			totalRead += read
+			totalDownloaded += float64(read)
 			if err == io.EOF {
 				if useMultipart {
 					multipartChunk.Close()
@@ -187,7 +193,12 @@ func writePartial(
 			if err != nil {
 				log.Fatal("Failed to read from resp:", err.Error())
 			}
-			var elapsedMilli = float64(time.Since(startTime).Milliseconds())
+			if time.Since(lastLogTime).Seconds() >= 5 {
+				var timeSoFarSec = (timeDownloadingMilli + float64(time.Since(chunkStartTime).Milliseconds())) / 1000
+				fmt.Fprintf(os.Stderr, "Worker %d downloading average %.3fMBps\n", workerNum, totalDownloaded/1e6/timeSoFarSec)
+				lastLogTime = time.Now()
+			}
+			var elapsedMilli = float64(time.Since(chunkStartTime).Milliseconds())
 			// For accurately enforcing very high min speeds, check if the entire chunk is done in time
 			var chunkTimedOut = elapsedMilli > maxTimeForChunkMilli
 			// For enforcing very low min speeds in a reasonable amount of time, verify we're meeting the min speed
@@ -198,16 +209,17 @@ func writePartial(
 					fmt.Fprintln(os.Stderr, "Too many slow/stalled connections for this chunk, giving up.")
 					os.Exit(int(unix.EIO))
 				}
-				fmt.Fprintln(os.Stderr, "Timed out on current chunk, resetting connection")
+				fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
 				// Reset useMultipart in case we're now far enough in the file that we can't use it anymore.
 				useMultipart = supportsMultipart && (curChunkStart+chunkSize*int64(numWorkers) < size)
 				multiReader = getMultipartReader(&downloader, curChunkStart, chunkSize, size, numWorkers, useMultipart)
 				multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, useMultipart)
 				totalRead = 0
-				startTime = time.Now()
+				chunkStartTime = time.Now()
 				attemptNumber++
 			}
 		}
+		timeDownloadingMilli += float64(time.Since(chunkStartTime).Milliseconds())
 		// Only slice the buffer if not completely full.
 		// I saw a marginal slowdown when always slicing (even if
 		// the slice was of the whole buffer)

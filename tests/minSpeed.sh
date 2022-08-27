@@ -21,7 +21,7 @@ rm -rf ~/fastar
 mkdir -p ~/fastar
 
 echo running fastar command
-./fastar http://localhost:8000/foo --min-speed 4096M -O > /tmp/download
+./fastar http://localhost:8000/foo --min-speed 4096M -O > /dev/null
 ret=$?
 
 echo checking if errored with exit code 5
