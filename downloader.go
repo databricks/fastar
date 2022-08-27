@@ -193,7 +193,7 @@ func writePartial(
 			if err != nil {
 				log.Fatal("Failed to read from resp:", err.Error())
 			}
-			if time.Since(lastLogTime).Seconds() >= 5 {
+			if time.Since(lastLogTime).Seconds() >= 30 {
 				var timeSoFarSec = (timeDownloadingMilli + float64(time.Since(chunkStartTime).Milliseconds())) / 1000
 				fmt.Fprintf(os.Stderr, "Worker %d downloading average %.3fMBps\n", workerNum, totalDownloaded/1e6/timeSoFarSec)
 				lastLogTime = time.Now()
