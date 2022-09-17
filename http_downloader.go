@@ -24,7 +24,7 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
 	resp := httpDownloader.retryHttpRequest(req)
 
 	if resp.ContentLength > *chunkSize {
-		_, err := httpDownloader.GetRanges([]int64{0, 1, 1, 2})
+		_, err := httpDownloader.GetRanges([][]int64{{0, 1}, {1, 2}})
 		if err == nil {
 			// Assume that if multipart range works, single range also works
 			return resp.ContentLength, true, true
@@ -52,14 +52,14 @@ func (httpDownloader HttpDownloader) Get() io.ReadCloser {
 func (httpDownloader HttpDownloader) GetRange(start, end int64) io.ReadCloser {
 	req := httpDownloader.generateRequest()
 
-	rangeString := GenerateRangeString([]int64{start, end})
+	rangeString := GenerateRangeString([][]int64{{start, end}})
 	req.Header.Add("Range", rangeString)
 
 	resp := httpDownloader.retryHttpRequest(req)
 	return resp.Body
 }
 
-func (httpDownloader HttpDownloader) GetRanges(ranges []int64) (*multipart.Reader, error) {
+func (httpDownloader HttpDownloader) GetRanges(ranges [][]int64) (*multipart.Reader, error) {
 	req := httpDownloader.generateRequest()
 
 	rangeString := GenerateRangeString(ranges)

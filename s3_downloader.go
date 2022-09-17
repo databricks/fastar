@@ -36,7 +36,7 @@ func (s3Downloader S3Downloader) Get() io.ReadCloser {
 }
 
 func (s3Downloader S3Downloader) GetRange(start, end int64) io.ReadCloser {
-	rangeString := GenerateRangeString([]int64{start, end})
+	rangeString := GenerateRangeString([][]int64{{start, end}})
 	req, resp := s3Downloader.generateRequestResponse(&rangeString)
 	err := req.Send()
 	if err != nil {
@@ -47,7 +47,7 @@ func (s3Downloader S3Downloader) GetRange(start, end int64) io.ReadCloser {
 
 // S3 doesn't support multipart range requests right now, so this will never be used
 // for actual file download. Still here for when they eventually do support it though.
-func (s3Downloader S3Downloader) GetRanges(ranges []int64) (*multipart.Reader, error) {
+func (s3Downloader S3Downloader) GetRanges(ranges [][]int64) (*multipart.Reader, error) {
 	return nil, errors.New("multipart range requests not supported by S3")
 }
 

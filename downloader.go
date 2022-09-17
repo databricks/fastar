@@ -23,11 +23,11 @@ import (
 // of indices passed to GetRanges().
 //
 // Returns garbage for empty ranges array.
-func GenerateRangeString(ranges []int64) string {
+func GenerateRangeString(ranges [][]int64) string {
 	var rangeString = "bytes="
-	for i := 0; i+1 < len(ranges); i += 2 {
-		rangeString += strconv.FormatInt(ranges[i], 10) + "-" + strconv.FormatInt(ranges[i+1]-1, 10)
-		if i+3 < len(ranges) {
+	for i := 0; i < len(ranges); i++ {
+		rangeString += strconv.FormatInt(ranges[i][0], 10) + "-" + strconv.FormatInt(ranges[i][1]-1, 10)
+		if i+1 < len(ranges) {
 			rangeString += ","
 		}
 	}
@@ -48,9 +48,9 @@ type Downloader interface {
 
 	// Return a multipart.Reader with the data in the specified ranges and an error if failed.
 	//
-	// ranges is an array where pairs of ints represent ranges of data to include.
+	// ranges is an n x 2 array where pairs of ints represent ranges of data to include.
 	// These pairs follow the convention of [x, y] means data[x] inclusive to data[y] exclusive.
-	GetRanges(ranges []int64) (*multipart.Reader, error)
+	GetRanges(ranges [][]int64) (*multipart.Reader, error)
 }
 
 // Returns a single io.Reader byte stream that transparently makes use of parallel
@@ -260,10 +260,10 @@ func getMultipartReader(
 	if !useMultipart {
 		return nil
 	}
-	var ranges = []int64{}
+	var ranges = [][]int64{}
 	var curChunkStart = start
 	for curChunkStart < size {
-		ranges = append(ranges, curChunkStart, curChunkStart+chunkSize)
+		ranges = append(ranges, []int64{curChunkStart, curChunkStart + chunkSize})
 		curChunkStart += (chunkSize * int64(numWorkers))
 	}
 	var reader, err = (*downloader).GetRanges(ranges)
