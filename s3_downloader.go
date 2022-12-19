@@ -2,14 +2,18 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"golang.org/x/sys/unix"
 )
 
 type S3Downloader struct {
@@ -19,29 +23,20 @@ type S3Downloader struct {
 
 func (s3Downloader S3Downloader) GetFileInfo() (int64, bool, bool) {
 	req, resp := s3Downloader.generateRequestResponse(nil)
-	err := req.Send()
-	if err != nil {
-		log.Fatal("AWS request failed: ", err.Error())
-	}
+	handleAwsError(req.Send())
 	return *resp.ContentLength, true, false
 }
 
 func (s3Downloader S3Downloader) Get() io.ReadCloser {
 	req, resp := s3Downloader.generateRequestResponse(nil)
-	err := req.Send()
-	if err != nil {
-		log.Fatal("AWS request failed: ", err.Error())
-	}
+	handleAwsError(req.Send())
 	return resp.Body
 }
 
 func (s3Downloader S3Downloader) GetRange(start, end int64) io.ReadCloser {
 	rangeString := GenerateRangeString([][]int64{{start, end}})
 	req, resp := s3Downloader.generateRequestResponse(&rangeString)
-	err := req.Send()
-	if err != nil {
-		log.Fatal("AWS request failed: ", err.Error())
-	}
+	handleAwsError(req.Send())
 	return resp.Body
 }
 
@@ -68,4 +63,20 @@ func getBucketAndKey(url string) (string, string) {
 	bucket := parts[0]
 	key := strings.Join(parts[1:], "/")
 	return bucket, key
+}
+
+func handleAwsError(err error) {
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case s3.ErrCodeNoSuchBucket:
+				fmt.Fprintln(os.Stderr, "404, s3 bucket not found")
+				os.Exit(int(unix.ENOENT))
+			case s3.ErrCodeNoSuchKey:
+				fmt.Fprintln(os.Stderr, "404, s3 key not found")
+				os.Exit(int(unix.ENOENT))
+			}
+		}
+		log.Fatal("AWS request failed: ", err.Error())
+	}
 }

@@ -2,16 +2,19 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/avast/retry-go"
+	"golang.org/x/sys/unix"
 )
 
 type HttpDownloader struct {
@@ -94,6 +97,7 @@ func (httpDownloader HttpDownloader) generateRequest() *http.Request {
 
 func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.Response {
 	var resp *http.Response
+	var throttled = false
 	err := retry.Do(
 		func() error {
 			curResp, err := httpDownloader.client.Do(req)
@@ -101,7 +105,14 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 				return err
 			}
 			if curResp.StatusCode == 404 {
-				log.Fatal("404, file not found")
+				fmt.Fprintln(os.Stderr, "404, file not found")
+				os.Exit(int(unix.ENOENT))
+			}
+			// Azure blob storage can return either 429 or 503 when throttling
+			// https://learn.microsoft.com/en-us/azure/storage/blobs/scalability-targets
+			if curResp.StatusCode == 429 || curResp.StatusCode == 503 {
+				throttled = true
+				return errors.New("throttled by download server " + strconv.Itoa(curResp.StatusCode))
 			}
 			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
 				return errors.New("non-200 response " + strconv.Itoa(curResp.StatusCode))
@@ -114,7 +125,12 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 		retry.Attempts(uint(*retryCount)),
 	)
 	if err != nil {
-		log.Fatal("Failed get request:", err.Error())
+		fmt.Fprint(os.Stderr, "Failed get request:", err.Error())
+		if throttled {
+			os.Exit(int(unix.EBUSY))
+		} else {
+			log.Fatal("unknown http response")
+		}
 	}
 	return resp
 }
