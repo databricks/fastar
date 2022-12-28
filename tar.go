@@ -21,9 +21,9 @@ import (
 var openFileTokens chan bool
 
 func ExtractTar(stream io.Reader) {
-	openFileTokens = make(chan bool, *writeWorkers)
+	openFileTokens = make(chan bool, opts.WriteWorkers)
 	tarReader := tar.NewReader(stream)
-	for i := 0; i < *writeWorkers; i++ {
+	for i := 0; i < opts.WriteWorkers; i++ {
 		openFileTokens <- true
 	}
 	// Hard linking is special, we need to make sure the file we're
@@ -46,16 +46,16 @@ func ExtractTar(stream io.Reader) {
 
 		name := header.Name
 		linkName := header.Linkname
-		if *stripComponents != 0 {
-			name = filepath.Join(strings.Split(name, "/")[*stripComponents:]...)
+		if opts.StripComponents != 0 {
+			name = filepath.Join(strings.Split(name, "/")[opts.StripComponents:]...)
 			if linkName != "" {
-				linkName = filepath.Join(strings.Split(linkName, "/")[*stripComponents:]...)
+				linkName = filepath.Join(strings.Split(linkName, "/")[opts.StripComponents:]...)
 			}
 		}
 		if name == "" {
 			continue
 		}
-		path := filepath.Join(*outputDir, name)
+		path := filepath.Join(opts.OutputDir, name)
 		info := header.FileInfo()
 		pathDir, _ := filepath.Split(path)
 		if _, err = os.Stat(pathDir); os.IsNotExist(err) {
@@ -89,13 +89,13 @@ func ExtractTar(stream io.Reader) {
 			wg.Add(1)
 			go writeFileAsync(path, buf, header, &wg)
 		case tar.TypeLink:
-			newPath := filepath.Join(*outputDir, linkName)
+			newPath := filepath.Join(opts.OutputDir, linkName)
 			hardLink(newPath, path, header, &wg)
 		case tar.TypeSymlink:
 			// Symlinks don't require the stop-the-world synchronization
 			// of hard links since they don't require the source file
 			// to exist.
-			if *overwrite {
+			if opts.Overwrite {
 				if _, err := os.Lstat(path); err == nil {
 					os.Remove(path)
 				}
@@ -105,7 +105,7 @@ func ExtractTar(stream io.Reader) {
 			}
 			os.Lchown(path, header.Uid, header.Gid)
 		default:
-			if *ignoreNodeFiles {
+			if opts.IgnoreNodeFiles {
 				fmt.Fprintln(
 					os.Stderr,
 					"ExtractTarGz: uknown type:",
@@ -129,7 +129,7 @@ func ExtractTar(stream io.Reader) {
 func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() { openFileTokens <- true }()
-	if *overwrite {
+	if opts.Overwrite {
 		if _, err := os.Stat(filename); err == nil {
 			os.Remove(filename)
 		}
@@ -150,7 +150,7 @@ func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.Wa
 func hardLink(newPath string, path string, header *tar.Header, wg *sync.WaitGroup) {
 	wg.Wait()
 
-	if *overwrite {
+	if opts.Overwrite {
 		if _, err := os.Stat(path); err == nil {
 			os.Remove(path)
 		}

@@ -26,7 +26,7 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
 	req := httpDownloader.generateRequest()
 	resp := httpDownloader.retryHttpRequest(req)
 
-	if resp.ContentLength > *chunkSize {
+	if resp.ContentLength > opts.ChunkSize {
 		_, err := httpDownloader.GetRanges([][]int64{{0, 1}, {1, 2}})
 		if err == nil {
 			// Assume that if multipart range works, single range also works
@@ -89,7 +89,7 @@ func (httpDownloader HttpDownloader) generateRequest() *http.Request {
 		log.Fatal("Failed creating GET request:", err.Error())
 	}
 
-	for key, value := range *headers {
+	for key, value := range opts.Headers {
 		req.Header.Add(key, value)
 	}
 	return req
@@ -121,8 +121,8 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 			return nil
 		},
 		retry.DelayType(retry.RandomDelay),
-		retry.MaxJitter(time.Second*time.Duration(*retryWait)),
-		retry.Attempts(uint(*retryCount)),
+		retry.MaxJitter(time.Second*time.Duration(opts.RetryWait)),
+		retry.Attempts(uint(opts.RetryCount)),
 	)
 	if err != nil {
 		fmt.Fprint(os.Stderr, "Failed get request:", err.Error())

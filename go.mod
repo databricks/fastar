@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go v1.43.39
 	github.com/didip/tollbooth v4.0.2+incompatible // indirect
 	github.com/go-sql-driver/mysql v1.5.0 // indirect
+	github.com/jessevdk/go-flags v1.5.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pierrec/lz4 v2.6.0+incompatible
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect

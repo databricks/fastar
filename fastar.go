@@ -13,29 +13,28 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jessevdk/go-flags"
 	"github.com/pierrec/lz4"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-var (
-	rawUrl          = kingpin.Arg("url", "URL to download from").Required().String()
-	numWorkers      = kingpin.Flag("download-workers", "How many parallel workers to download the file").Default("8").Int()
-	chunkSize       = kingpin.Flag("chunk-size", "Size of file chunks (in MB) to pull in parallel").Default("50").Int64()
-	outputDir       = kingpin.Flag("directory", "Directory to extract tarball to. Defaults to current dir if not specified.").Short('C').ExistingDir()
-	toStdout        = kingpin.Flag("to-stdout", "Dump downloaded file to stdout rather than extracting to disk").Default("false").Short('O').Bool()
-	writeWorkers    = kingpin.Flag("write-workers", "How many parallel workers to use to write file to disk").Default("8").Int()
-	stripComponents = kingpin.Flag("strip-components", "Strip STRIP-COMPONENTS leading components from file names on extraction").Int()
-	compression     = kingpin.Flag("compression", "Force specific compression schema instead of inferring from magic bytes and filename extension (tar, gzip, or lz4)").Enum("tar", "gzip", "lz4")
-	retryCount      = kingpin.Flag("retry-count", "Max number of retries for a single chunk").Default("2").Int()
-	retryWait       = kingpin.Flag("retry-wait", "Max number of seconds to wait in between retries (with jitter)").Default("2").Int()
-	minSpeed        = kingpin.Flag("min-speed", "Minimum speed per each chunk download. Retries and then fails if any are slower than this. 0 for no min speed, append K or M for KBps or MBps.").Default("1K").String()
-	connTimeout     = kingpin.Flag("connection-timeout", "Abort download if TCP dial takes longer than this many seconds").Default("60").Int()
-	ignoreNodeFiles = kingpin.Flag("ignore-node-files", "Don't throw errors on character or block device nodes").Default("false").Bool()
-	overwrite       = kingpin.Flag("overwrite", "Overwrite any existing files").Default("false").Bool()
-	headers         = kingpin.Flag("headers", "Headers to use with http request").Short('H').PlaceHolder("HEADER:VALUE").StringMap()
+var opts struct {
+	NumWorkers      int               `long:"download-workers" default:"8" description:"How many parallel workers to download the file"`
+	ChunkSize       int64             `long:"chunk-size" default:"50" description:"Size of file chunks (in MB) to pull in parallel"`
+	OutputDir       string            `long:"directory" short:"C" description:"Directory to extract tarball to. Defaults to current dir if not specified"`
+	ToStdout        bool              `long:"to-stdout" short:"O" description:"Dump downloaded file to stdout rather than extracting to disk"`
+	WriteWorkers    int               `long:"write-workers" default:"8" description:"How many parallel workers to use to write file to disk"`
+	StripComponents int               `long:"strip-components" description:"Strip STRIP-COMPONENTS leading components from file names on extraction"`
+	Compression     string            `long:"compression" choice:"tar" choice:"gzip" choice:"lz4" description:"Force specific compression schema instead of inferring from magic bytes or filename extension"`
+	RetryCount      int               `long:"retry-count" default:"2" description:"Max number of retries for a single chunk"`
+	RetryWait       int               `long:"retry-wait" default:"2" description:"Max number of seconds to wait in between retries (with jitter)"`
+	MinSpeed        string            `long:"min-speed" default:"1K" description:"Minimum speed per each chunk download. Retries and then fails if any are slower than this. 0 for no min speed, append K or M for KBps or MBps"`
+	ConnTimeout     int               `long:"connection-timeout" default:"60" description:"Abort download if TCP dial takes longer than this many seconds"`
+	IgnoreNodeFiles bool              `long:"ignore-node-files" description:"Don't throw errors on character or block device nodes"`
+	Overwrite       bool              `long:"overwrite" description:"Overwrite any existing files"`
+	Headers         map[string]string `long:"headers" short:"H" description:"Headers to use with http request"`
+}
 
-	minSpeedBytesPerMillisecond = 0.0
-)
+var minSpeedBytesPerMillisecond = 0.0
 
 // Magic byte sequences prepended to the start of every gzip or lz4
 // compressed bundle. When downloading a file we can check for either
@@ -55,21 +54,29 @@ const (
 )
 
 func main() {
-	kingpin.Parse()
+	var parser = flags.NewParser(&opts, flags.HelpFlag|flags.IgnoreUnknown)
+	args, err := parser.Parse()
+	if err != nil {
+		log.Fatal("Failed to parse arguments: ", err)
+	}
+	if len(args) == 0 {
+		log.Fatal("Please pass source URL to download file from")
+	}
+	var rawUrl = args[0]
 	processMinSpeedFlag()
-	*chunkSize *= 1e6 // Convert chunk size from MB to B
-	fileStream := GetDownloadStream(*rawUrl, *chunkSize, *numWorkers)
+	opts.ChunkSize *= 1e6 // Convert chunk size from MB to B
+	fileStream := GetDownloadStream(rawUrl, opts.ChunkSize, opts.NumWorkers)
 
-	url, err := url.Parse(*rawUrl)
+	url, err := url.Parse(rawUrl)
 	if err != nil {
 		log.Fatal("Failed to parse url: ", err.Error())
 	}
 	filename := path.Base(url.Path)
 
 	fmt.Fprintln(os.Stderr, "File name: "+filename)
-	fmt.Fprintln(os.Stderr, "Num Download Workers: "+strconv.Itoa(*numWorkers))
-	fmt.Fprintln(os.Stderr, "Chunk Size (Mib): "+strconv.FormatInt(*chunkSize/1e6, 10))
-	fmt.Fprintln(os.Stderr, "Num Disk Workers: "+strconv.Itoa(*writeWorkers))
+	fmt.Fprintln(os.Stderr, "Num Download Workers: "+strconv.Itoa(opts.NumWorkers))
+	fmt.Fprintln(os.Stderr, "Chunk Size (Mib): "+strconv.FormatInt(opts.ChunkSize/1e6, 10))
+	fmt.Fprintln(os.Stderr, "Num Disk Workers: "+strconv.Itoa(opts.WriteWorkers))
 
 	magicNumber, splicedStream := getMagicNumber(fileStream)
 
@@ -89,13 +96,13 @@ func main() {
 		log.Fatal("CompressionType not set, should be impossible")
 	}
 
-	if *toStdout {
+	if opts.ToStdout {
 		if _, err := io.Copy(os.Stdout, finalStream); err != nil {
 			log.Fatal("Failed to write file to stdout: ", err.Error())
 		}
 	} else {
-		if *outputDir == "" {
-			if *outputDir, err = os.Getwd(); err != nil {
+		if opts.OutputDir == "" {
+			if opts.OutputDir, err = os.Getwd(); err != nil {
 				log.Fatal("Failed to get current working directory: ", err.Error())
 			}
 		}
@@ -130,11 +137,11 @@ func getMagicNumber(reader io.Reader) (string, io.Reader) {
 // 3. Inferred by file extension prefix in URL
 // 4. Default to raw tarball
 func getCompressionType(filename string, magicNumber string) CompressionType {
-	if *compression != "" {
-		if *compression == "tar" {
+	if opts.Compression != "" {
+		if opts.Compression == "tar" {
 			fmt.Fprintln(os.Stderr, "Forcing raw tar")
 			return Tar
-		} else if *compression == "gzip" {
+		} else if opts.Compression == "gzip" {
 			fmt.Fprintln(os.Stderr, "Forcing gzip")
 			return Gzip
 		} else {
@@ -170,19 +177,19 @@ func getCompressionType(filename string, magicNumber string) CompressionType {
 func processMinSpeedFlag() {
 	var bytesPerSecond int
 	var err error
-	if strings.HasSuffix(*minSpeed, "K") {
-		if bytesPerSecond, err = strconv.Atoi((*minSpeed)[:len(*minSpeed)-1]); err != nil {
-			log.Fatal("Failed to parse min speed argument", minSpeed, err.Error())
+	if strings.HasSuffix(opts.MinSpeed, "K") {
+		if bytesPerSecond, err = strconv.Atoi((opts.MinSpeed)[:len(opts.MinSpeed)-1]); err != nil {
+			log.Fatal("Failed to parse min speed argument", opts.MinSpeed, err.Error())
 		}
 		bytesPerSecond *= 1e3
-	} else if strings.HasSuffix(*minSpeed, "M") {
-		if bytesPerSecond, err = strconv.Atoi((*minSpeed)[:len(*minSpeed)-1]); err != nil {
-			log.Fatal("Failed to parse min speed argument", minSpeed, err.Error())
+	} else if strings.HasSuffix(opts.MinSpeed, "M") {
+		if bytesPerSecond, err = strconv.Atoi((opts.MinSpeed)[:len(opts.MinSpeed)-1]); err != nil {
+			log.Fatal("Failed to parse min speed argument", opts.MinSpeed, err.Error())
 		}
 		bytesPerSecond *= 1e6
 	} else {
-		if bytesPerSecond, err = strconv.Atoi(*minSpeed); err != nil {
-			log.Fatal("Failed to parse min speed argument", minSpeed, err.Error())
+		if bytesPerSecond, err = strconv.Atoi(opts.MinSpeed); err != nil {
+			log.Fatal("Failed to parse min speed argument", opts.MinSpeed, err.Error())
 		}
 	}
 	minSpeedBytesPerMillisecond = float64(bytesPerSecond) / 1e3

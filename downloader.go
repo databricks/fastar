@@ -64,9 +64,9 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	var downloader Downloader
 	var netTransport = &http.Transport{
 		Dial: (&net.Dialer{
-			Timeout: time.Duration(*connTimeout) * time.Second,
+			Timeout: time.Duration(opts.ConnTimeout) * time.Second,
 		}).Dial,
-		TLSHandshakeTimeout: time.Duration(*connTimeout) * time.Second,
+		TLSHandshakeTimeout: time.Duration(opts.ConnTimeout) * time.Second,
 	}
 	var httpClient = http.Client{
 		Transport: netTransport,
@@ -207,7 +207,7 @@ func writePartial(
 			// after a second.
 			var chunkTooSlowSoFar = elapsedMilli > 1000 && float64(totalRead)/elapsedMilli < minSpeedBytesPerMillisecond
 			if chunkTimedOut || chunkTooSlowSoFar {
-				if attemptNumber > *retryCount {
+				if attemptNumber > opts.RetryCount {
 					fmt.Fprintln(os.Stderr, "Too many slow/stalled connections for this chunk, giving up.")
 					os.Exit(int(unix.EIO))
 				}
