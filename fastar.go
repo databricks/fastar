@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 
@@ -18,7 +16,7 @@ import (
 )
 
 var (
-	rawUrl          = kingpin.Arg("url", "URL to download from").Required().String()
+	rawUrl          = kingpin.Arg("url", "URL to download from. Default reads from stdin").Default("-").String()
 	numWorkers      = kingpin.Flag("download-workers", "How many parallel workers to download the file").Default("8").Int()
 	chunkSize       = kingpin.Flag("chunk-size", "Size of file chunks (in MB) to pull in parallel").Default("50").Int64()
 	outputDir       = kingpin.Flag("directory", "Directory to extract tarball to. Defaults to current dir if not specified.").Short('C').ExistingDir()
@@ -58,15 +56,9 @@ func main() {
 	kingpin.Parse()
 	processMinSpeedFlag()
 	*chunkSize *= 1e6 // Convert chunk size from MB to B
-	fileStream := GetDownloadStream(*rawUrl, *chunkSize, *numWorkers)
+	fileStream, filename := GetDownloadStream(*rawUrl, *chunkSize, *numWorkers)
 
-	url, err := url.Parse(*rawUrl)
-	if err != nil {
-		log.Fatal("Failed to parse url: ", err.Error())
-	}
-	filename := path.Base(url.Path)
-
-	fmt.Fprintln(os.Stderr, "File name: "+filename)
+	fmt.Fprintln(os.Stderr, "Source: "+*rawUrl)
 	fmt.Fprintln(os.Stderr, "Num Download Workers: "+strconv.Itoa(*numWorkers))
 	fmt.Fprintln(os.Stderr, "Chunk Size (Mib): "+strconv.FormatInt(*chunkSize/1e6, 10))
 	fmt.Fprintln(os.Stderr, "Num Disk Workers: "+strconv.Itoa(*writeWorkers))
@@ -76,6 +68,7 @@ func main() {
 	compressionType := getCompressionType(filename, magicNumber)
 
 	var finalStream io.Reader
+	var err error
 	if compressionType == Lz4 {
 		finalStream = lz4.NewReader(splicedStream)
 	} else if compressionType == Gzip {
