@@ -192,9 +192,6 @@ func writePartial(
 				}
 				break
 			}
-			if err != nil {
-				log.Fatal("Failed to read from resp:", err.Error())
-			}
 			if time.Since(lastLogTime).Seconds() >= 30 {
 				var timeSoFarSec = (timeDownloadingMilli + float64(time.Since(chunkStartTime).Milliseconds())) / 1000
 				fmt.Fprintf(os.Stderr, "Worker %d downloading average %.3fMBps\n", workerNum, totalDownloaded/1e6/timeSoFarSec)
@@ -206,12 +203,16 @@ func writePartial(
 			// For enforcing very low min speeds in a reasonable amount of time, verify we're meeting the min speed
 			// after a second.
 			var chunkTooSlowSoFar = elapsedMilli > 1000 && float64(totalRead)/elapsedMilli < minSpeedBytesPerMillisecond
-			if chunkTimedOut || chunkTooSlowSoFar {
+			if chunkTimedOut || chunkTooSlowSoFar || err != nil {
 				if attemptNumber > opts.RetryCount {
-					fmt.Fprintln(os.Stderr, "Too many slow/stalled connections for this chunk, giving up.")
+					fmt.Fprintln(os.Stderr, "Too many slow/stalled/failed connections for this chunk, giving up.")
 					os.Exit(int(unix.EIO))
 				}
-				fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
+				} else {
+					fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
+				}
 				// Reset useMultipart in case we're now far enough in the file that we can't use it anymore.
 				useMultipart = supportsMultipart && (curChunkStart+chunkSize*int64(numWorkers) < size)
 				multiReader = getMultipartReader(&downloader, curChunkStart, chunkSize, size, numWorkers, useMultipart)
