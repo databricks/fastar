@@ -18,8 +18,8 @@ import (
 )
 
 var opts struct {
-	NumWorkers      int               `long:"download-workers" default:"8" description:"How many parallel workers to download the file"`
-	ChunkSize       int64             `long:"chunk-size" default:"50" description:"Size of file chunks (in MB) to pull in parallel"`
+	NumWorkers      int               `long:"download-workers" default:"4" description:"How many parallel workers to download the file"`
+	ChunkSize       int64             `long:"chunk-size" default:"200" description:"Size of file chunks (in MB) to pull in parallel"`
 	OutputDir       string            `long:"directory" short:"C" description:"Directory to extract tarball to. Defaults to current dir if not specified"`
 	ToStdout        bool              `long:"to-stdout" short:"O" description:"Dump downloaded file to stdout rather than extracting to disk"`
 	WriteWorkers    int               `long:"write-workers" default:"8" description:"How many parallel workers to use to write file to disk"`
