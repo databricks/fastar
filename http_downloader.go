@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"mime"
 	"mime/multipart"
@@ -104,18 +105,24 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 			if err != nil {
 				return err
 			}
-			if curResp.StatusCode == 404 {
-				fmt.Fprintln(os.Stderr, "404, file not found")
-				os.Exit(int(unix.ENOENT))
-			}
-			// Azure blob storage can return either 429 or 503 when throttling
-			// https://learn.microsoft.com/en-us/azure/storage/blobs/scalability-targets
-			if curResp.StatusCode == 429 || curResp.StatusCode == 503 {
-				throttled = true
-				return errors.New("throttled by download server " + strconv.Itoa(curResp.StatusCode))
-			}
 			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
-				return errors.New("non-200 response " + strconv.Itoa(curResp.StatusCode))
+				fmt.Fprintf(os.Stderr, "failed response: %+v\n", *curResp)
+				if curResp.ContentLength != 0 {
+					if body, err := ioutil.ReadAll(curResp.Body); err == nil {
+						fmt.Fprintln(os.Stderr, "response body:", string(body))
+					}
+				}
+				if curResp.StatusCode == 404 {
+					fmt.Fprintln(os.Stderr, "404, file not found")
+					os.Exit(int(unix.ENOENT))
+				}
+				// Azure blob storage can return either 429 or 503 when throttling
+				// https://learn.microsoft.com/en-us/azure/storage/blobs/scalability-targets
+				if curResp.StatusCode == 429 || curResp.StatusCode == 503 {
+					throttled = true
+					return errors.New("throttled by download server " + strconv.Itoa(curResp.StatusCode))
+				}
+				return errors.New("unknown non-2xx response " + strconv.Itoa(curResp.StatusCode))
 			}
 			resp = curResp
 			return nil
@@ -125,7 +132,7 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 		retry.Attempts(uint(opts.RetryCount)),
 	)
 	if err != nil {
-		fmt.Fprint(os.Stderr, "Failed get request:", err.Error())
+		fmt.Fprintln(os.Stderr, "Failed get request:", err.Error())
 		if throttled {
 			os.Exit(int(unix.EBUSY))
 		} else {
