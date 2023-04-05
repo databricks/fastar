@@ -25,8 +25,9 @@ var opts struct {
 	WriteWorkers    int               `long:"write-workers" default:"8" description:"How many parallel workers to use to write file to disk"`
 	StripComponents int               `long:"strip-components" description:"Strip STRIP-COMPONENTS leading components from file names on extraction"`
 	Compression     string            `long:"compression" choice:"tar" choice:"gzip" choice:"lz4" description:"Force specific compression schema instead of inferring from magic bytes or filename extension"`
-	RetryCount      int               `long:"retry-count" default:"2" description:"Max number of retries for a single chunk"`
-	RetryWait       int               `long:"retry-wait" default:"2" description:"Max number of seconds to wait in between retries (with jitter)"`
+	RetryCount      int               `long:"retry-count" default:"4" description:"Max number of retries for a single chunk (exponential backoff starting at --retry-wait seconds)"`
+	RetryWait       int               `long:"retry-wait" default:"1" description:"Starting number of seconds to wait in between retries (2x every retry)"`
+	MaxWait         int               `long:"max-wait" default:"10" description:"Exponential retry wait is capped at this many seconds"`
 	MinSpeed        string            `long:"min-speed" default:"1K" description:"Minimum speed per each chunk download. Retries and then fails if any are slower than this. 0 for no min speed, append K or M for KBps or MBps"`
 	ConnTimeout     int               `long:"connection-timeout" default:"60" description:"Abort download if TCP dial takes longer than this many seconds"`
 	IgnoreNodeFiles bool              `long:"ignore-node-files" description:"Don't throw errors on character or block device nodes"`

@@ -127,9 +127,10 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 			resp = curResp
 			return nil
 		},
-		retry.DelayType(retry.RandomDelay),
-		retry.MaxJitter(time.Second*time.Duration(opts.RetryWait)),
+		retry.DelayType(retry.BackOffDelay),
+		retry.Delay(time.Second*time.Duration(opts.RetryWait)),
 		retry.Attempts(uint(opts.RetryCount)),
+		retry.MaxDelay(time.Second*time.Duration(opts.MaxWait)),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed get request:", err.Error())
