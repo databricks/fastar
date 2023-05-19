@@ -1,0 +1,42 @@
+Databricks Fastar Package
+Copyright 2023-present Databricks, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+This Software contains code from the following open source projects, licensed under the Apache 2.0 license:
+
+aws/aws-sdk-go - https://github.com/aws/aws-sdk-go
+Copyright AWS Authors
+License - https://github.com/aws/aws-sdk-go/blob/main/LICENSE.txt
+---
+
+This software contains code from the following open source projects, licensed under the BSD (3-clause) license.
+
+jessevdk/go-flags - https://github.com/jessevdk/go-flags
+Copyright (c) 2012 Jesse van den Kieboom. All rights reserved.
+License - https://github.com/jessevdk/go-flags/blob/master/LICENSE
+
+pierrec/lz4 - https://github.com/pierrec/lz4
+Copyright (c) 2015, Pierre Curto. All rights reserved.
+License - https://github.com/pierrec/lz4/blob/v4/LICENSE
+—--
+
+This Software contains code from the following open source projects, licensed under the MIT license:
+
+avast/retry-go - https://github.com/avast/retry-go
+Copyright (c) 2017 Avast
+License - https://github.com/avast/retry-go/blob/master/LICENSE
+
+didip/tollbooth - https://github.com/didip/tollbooth
+Copyright (c) 2015 Didip Kerabat
+License - https://github.com/didip/tollbooth/blob/master/LICENSE
