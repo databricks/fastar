@@ -53,15 +53,7 @@ type Downloader interface {
 	GetRanges(ranges [][]int64) (*multipart.Reader, error)
 }
 
-// Returns a single io.Reader byte stream that transparently makes use of parallel
-// workers to speed up download.
-//
-// Infers s3 vs http download source by the url (should I include a flag to force this?)
-//
-// Will fall back to a single download stream if the download source doesn't support
-// RANGE requests or if the total file is smaller than a single download chunk.
-func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
-	var downloader Downloader
+func GetDownloader(url string) Downloader {
 	var netTransport = &http.Transport{
 		Dial: (&net.Dialer{
 			Timeout: time.Duration(opts.ConnTimeout) * time.Second,
@@ -72,10 +64,18 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 		Transport: netTransport,
 	}
 	if strings.HasPrefix(url, "s3") {
-		downloader = S3Downloader{url, s3.New(session.Must(session.NewSession(&aws.Config{HTTPClient: &httpClient})))}
+		return S3Downloader{url, s3.New(session.Must(session.NewSession(&aws.Config{HTTPClient: &httpClient})))}
 	} else {
-		downloader = HttpDownloader{url, &httpClient}
+		return HttpDownloader{url, &httpClient}
 	}
+}
+
+// Returns a single io.Reader byte stream that transparently makes use of parallel
+// workers to speed up download.
+//
+// Will fall back to a single download stream if the download source doesn't support
+// RANGE requests or if the total file is smaller than a single download chunk.
+func GetDownloadStream(downloader Downloader, chunkSize int64, numWorkers int) io.Reader {
 	var size, supportsRange, supportsMultipart = downloader.GetFileInfo()
 	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
 	if !supportsRange || size < chunkSize {
@@ -85,7 +85,8 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 	// Bool channels used to synchronize when workers write to the output stream.
 	// Each worker sleeps until a token is pushed to their channel by the previous
 	// worker. When they finish writing their current chunk they push a token to
-	// the next worker.
+	// the next worker. This avoids multiple workers writing data at the same time
+	// and getting garbled.
 	var chans []chan bool
 	for i := 0; i < numWorkers; i++ {
 		chans = append(chans, make(chan bool, 1))
@@ -107,6 +108,8 @@ func GetDownloadStream(url string, chunkSize int64, numWorkers int) io.Reader {
 			chans[i],
 			chans[(i+1)%numWorkers])
 	}
+	// Send initial token to worker 0 signifying they can start writing data to
+	// the pipe.
 	chans[0] <- true
 	return reader
 }
@@ -159,7 +162,7 @@ func writePartial(
 	var r = bytes.NewReader(buf)
 	for curChunkStart < size {
 
-		multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, useMultipart)
+		multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, size, useMultipart)
 		if !useMultipart {
 			// When not using multipart, every new chunk is a new network connection so reset attemptNumber
 			attemptNumber = 1
@@ -216,7 +219,7 @@ func writePartial(
 				// Reset useMultipart in case we're now far enough in the file that we can't use it anymore.
 				useMultipart = supportsMultipart && (curChunkStart+chunkSize*int64(numWorkers) < size)
 				multiReader = getMultipartReader(&downloader, curChunkStart, chunkSize, size, numWorkers, useMultipart)
-				multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, useMultipart)
+				multipartChunk, chunk = getNextChunk(&downloader, multiReader, curChunkStart, chunkSize, size, useMultipart)
 				totalRead = 0
 				chunkStartTime = time.Now()
 				attemptNumber++
@@ -264,7 +267,11 @@ func getMultipartReader(
 	var ranges = [][]int64{}
 	var curChunkStart = start
 	for curChunkStart < size {
-		ranges = append(ranges, []int64{curChunkStart, curChunkStart + chunkSize})
+		if curChunkStart+chunkSize < size {
+			ranges = append(ranges, []int64{curChunkStart, curChunkStart + chunkSize})
+		} else {
+			ranges = append(ranges, []int64{curChunkStart, size})
+		}
 		curChunkStart += (chunkSize * int64(numWorkers))
 	}
 	var reader, err = (*downloader).GetRanges(ranges)
@@ -280,6 +287,7 @@ func getNextChunk(
 	multiReader *multipart.Reader,
 	start int64,
 	chunkSize int64,
+	size int64,
 	useMultipart bool) (*multipart.Part, io.ReadCloser) {
 	if useMultipart {
 		var multipartChunk, err = multiReader.NextPart()
@@ -288,6 +296,9 @@ func getNextChunk(
 		}
 		return multipartChunk, nil
 	} else {
-		return nil, (*downloader).GetRange(start, start+chunkSize)
+		if start+chunkSize < size {
+			return nil, (*downloader).GetRange(start, start+chunkSize)
+		}
+		return nil, (*downloader).GetRange(start, size)
 	}
 }

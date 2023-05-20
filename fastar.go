@@ -66,7 +66,7 @@ func main() {
 	var rawUrl = args[0]
 	processMinSpeedFlag()
 	opts.ChunkSize *= 1e6 // Convert chunk size from MB to B
-	fileStream := GetDownloadStream(rawUrl, opts.ChunkSize, opts.NumWorkers)
+	fileStream := GetDownloadStream(GetDownloader(rawUrl), opts.ChunkSize, opts.NumWorkers)
 
 	url, err := url.Parse(rawUrl)
 	if err != nil {
