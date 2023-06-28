@@ -26,6 +26,7 @@ type HttpDownloader struct {
 func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
 	req := httpDownloader.generateRequest()
 	resp := httpDownloader.retryHttpRequest(req)
+	resp.Body.Close()
 
 	if resp.ContentLength > opts.ChunkSize {
 		_, err := httpDownloader.GetRanges([][]int64{{0, 1}, {1, 2}})

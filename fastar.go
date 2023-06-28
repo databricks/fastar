@@ -32,6 +32,7 @@ var opts struct {
 	ConnTimeout     int               `long:"connection-timeout" default:"60" description:"Abort download if TCP dial takes longer than this many seconds"`
 	IgnoreNodeFiles bool              `long:"ignore-node-files" description:"Don't throw errors on character or block device nodes"`
 	Overwrite       bool              `long:"overwrite" description:"Overwrite any existing files"`
+	SkipOldFiles    bool              `long:"skip-old-files" description:"Silently skip existing files when extracting"`
 	Headers         map[string]string `long:"headers" short:"H" description:"Headers to use with http request"`
 }
 

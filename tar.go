@@ -56,6 +56,12 @@ func ExtractTar(stream io.Reader) {
 			continue
 		}
 		path := filepath.Join(opts.OutputDir, name)
+		if opts.SkipOldFiles {
+			if _, err = os.Stat(path); err == nil {
+				// User passed the --skip-old-files flag and this file already exists so skip extraction
+				continue
+			}
+		}
 		info := header.FileInfo()
 		pathDir, _ := filepath.Split(path)
 		if _, err = os.Stat(pathDir); os.IsNotExist(err) {

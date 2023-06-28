@@ -225,4 +225,5 @@ func writePartial(
 		}
 		reader.AdvanceNextChunk()
 	}
+	fmt.Fprintf(os.Stderr, "Worker %d total download speed %.3fMBps\n", workerNum, totalDownloaded/1e3/timeDownloadingMilli)
 }
