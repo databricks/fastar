@@ -143,9 +143,9 @@ func writePartial(
 	// In memory buffer for caching our chunk until it's our turn to write to pipe
 	var buf = make([]byte, chunkSize)
 	var r = bytes.NewReader(buf)
-	for reader.CurPos < size {
+	for reader.CurChunkStart < size {
 
-		reader.RequestNextChunk()
+		reader.RequestChunk()
 		if !reader.UseMultipart() {
 			// When not using multipart, every new chunk is a new network connection so reset attemptNumber
 			attemptNumber = 1
@@ -191,10 +191,8 @@ func writePartial(
 				} else {
 					fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
 				}
-				reader.Reset()
-				reader.RequestNextChunk()
-				totalRead = 0
-				chunkStartTime = time.Now()
+				reader.Reset(reader.CurChunkStart + int64(totalRead))
+				reader.RequestChunk()
 				attemptNumber++
 			}
 		}
@@ -218,7 +216,7 @@ func writePartial(
 		// Only send token if next worker has more work to do,
 		// otherwise they already exited and won't be waiting
 		// for a token.
-		if reader.CurPos+chunkSize < size {
+		if reader.CurChunkStart+chunkSize < size {
 			nextChan <- true
 		} else {
 			writer.Close()
