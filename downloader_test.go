@@ -78,7 +78,7 @@ func (testDownloader TestDownloader) GetRanges(ranges [][]int64) (*multipart.Rea
 
 func TestSingleReader(t *testing.T) {
 	opts.RetryCount = math.MaxInt64
-	for fileSize := int64(0); fileSize < 32; fileSize++ {
+	for fileSize := int64(0); fileSize < 64; fileSize++ {
 		data := RandomString(fileSize)
 		downloader := TestDownloader{data, false, false}
 		for chunkSize := int64(0); chunkSize < 32; chunkSize++ {
@@ -98,7 +98,7 @@ func TestSingleReader(t *testing.T) {
 
 func TestRangeReader(t *testing.T) {
 	opts.RetryCount = math.MaxInt64
-	for fileSize := int64(0); fileSize < 32; fileSize++ {
+	for fileSize := int64(0); fileSize < 64; fileSize++ {
 		data := RandomString(fileSize)
 		downloader := TestDownloader{data, true, false}
 		for chunkSize := int64(1); chunkSize < 32; chunkSize++ {
@@ -118,7 +118,7 @@ func TestRangeReader(t *testing.T) {
 
 func TestMultipartRangeReader(t *testing.T) {
 	opts.RetryCount = math.MaxInt64
-	for fileSize := int64(0); fileSize < 32; fileSize++ {
+	for fileSize := int64(0); fileSize < 64; fileSize++ {
 		data := RandomString(fileSize)
 		downloader := TestDownloader{data, true, true}
 		for chunkSize := int64(1); chunkSize < 32; chunkSize++ {

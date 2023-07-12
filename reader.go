@@ -1,9 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"mime/multipart"
+	"os"
 )
 
 // Helper struct to abstract away the complexity of single vs multi part
@@ -62,11 +67,18 @@ func (r *Reader) RequestChunk() {
 			log.Fatal("Error getting next multipart chunk:", err.Error())
 		}
 	} else {
+		if min(r.CurChunkStart+r.ChunkSize, r.Size) < r.CurPos {
+			foo, _ := json.MarshalIndent(r, "", " ")
+			fmt.Fprintln(os.Stderr, string(foo))
+		}
 		r.Chunk = r.Downloader.GetRange(r.CurPos, min(r.CurChunkStart+r.ChunkSize, r.Size))
 	}
 }
 
 func (r *Reader) Read(d []byte) (int, error) {
+	if len(d) > 0 && rand.Intn(1000) < 950 {
+		return 0, errors.New("foo")
+	}
 	if r.UseMultipart() {
 		return r.MultipartChunk.Read(d)
 	} else {
