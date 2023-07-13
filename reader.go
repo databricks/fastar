@@ -87,10 +87,13 @@ func (r *Reader) Read(d []byte) (int, error) {
 }
 
 func (r *Reader) Close() error {
-	if r.UseMultipart() {
+	if r.UseMultipart() && r.MultipartChunk != nil {
 		return r.MultipartChunk.Close()
-	} else {
+	} else if !r.UseMultipart() && r.Chunk != nil {
 		return r.Chunk.Close()
+	} else {
+		fmt.Fprintln(os.Stderr, "Attempting to close nil chunk, silently succeeding")
+		return nil
 	}
 }
 
