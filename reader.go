@@ -74,7 +74,7 @@ func (r *Reader) RequestChunk() {
 func (r *Reader) Read(d []byte) (int, error) {
 	if flag.Lookup("test.v") != nil && rand.Intn(100) < 95 {
 		// We're running as part of a unit test, randomly fail read calls 95% of the time
-		return 0, errors.New("Forced read fail for testing")
+		return 0, errors.New("forced read fail for testing")
 	}
 	if r.UseMultipart() {
 		return r.MultipartChunk.Read(d)
