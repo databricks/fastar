@@ -81,7 +81,7 @@ func GetDownloader(url string) Downloader {
 // RANGE requests or if the total file is smaller than a single download chunk.
 func GetDownloadStream(downloader Downloader, chunkSize int64, numWorkers int) io.Reader {
 	var size, supportsRange, supportsMultipart = downloader.GetFileInfo()
-	// fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
+	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
 	if !supportsRange || size < chunkSize {
 		return downloader.Get()
 	}
@@ -165,6 +165,7 @@ func writePartial(
 		// Used by reader thread to tell writer there's more data it can pipe out
 		moreToWrite := make(chan bool, 1)
 
+		// Async thread to read off the network into in memory buffer
 		go func() {
 			var chunkStartTime = time.Now()
 			for {
@@ -202,7 +203,7 @@ func writePartial(
 						os.Exit(int(unix.EIO))
 					}
 					if err != nil {
-						// fmt.Fprintf(os.Stderr, "Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
+						fmt.Fprintf(os.Stderr, "Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
 					} else {
 						fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
 					}
