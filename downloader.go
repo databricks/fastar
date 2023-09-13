@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -81,7 +80,7 @@ func GetDownloader(url string) Downloader {
 // RANGE requests or if the total file is smaller than a single download chunk.
 func GetDownloadStream(downloader Downloader, chunkSize int64, numWorkers int) io.Reader {
 	var size, supportsRange, supportsMultipart = downloader.GetFileInfo()
-	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
+	// fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
 	if !supportsRange || size < chunkSize {
 		return downloader.Get()
 	}
@@ -149,7 +148,7 @@ func writePartial(
 	// Read data off the wire and into an in memory buffer to greedily
 	// force the chunk to be read. Otherwise we'd still be
 	// bottlenecked by resp.Body.Read() when copying to stdout.
-	var buf = make([]byte, chunkSize)
+	var data = make(chan []byte, chunkSize)
 
 	for reader.CurChunkStart < size {
 
@@ -162,28 +161,23 @@ func writePartial(
 		var totalRead = int64(0)
 		var totalWritten = int64(0)
 
-		// Used by reader thread to tell writer there's more data it can pipe out
-		moreToWrite := make(chan bool, 1)
-
 		// Async thread to read off the network into in memory buffer
 		go func() {
 			var chunkStartTime = time.Now()
 			for {
-				if totalRead > totalWritten && len(moreToWrite) == 0 {
-					moreToWrite <- true
-				}
 				var read int
-				// We explicitly use Read() rather than ReadAll() as this lets us use
-				// a static buffer of our choosing. ReadAll() allocates a new buffer
-				// for every single chunk, resulting in a ~30% slowdown.
-				// We also wouldn't be able to enforce min speeds as there's no way to
-				// MITM ReadAll().
-				read, err = reader.Read(buf[totalRead:])
+				var buf = make([]byte, 1<<12)
+				read, err = reader.Read(buf)
 				totalRead += int64(read)
 				totalDownloaded += float64(read)
+				if read > 0 {
+					data <- buf[0:read]
+				}
 				// Make sure to handle bytes read before error handling, Read() can return successful bytes and error in the same call.
 				if ChunkFinished(reader.CurChunkStart, totalRead, size, chunkSize) {
-					reader.Close()
+					if size > 0 {
+						reader.Close()
+					}
 					break
 				}
 				var elapsedMilli = float64(time.Since(chunkStartTime).Milliseconds())
@@ -203,7 +197,7 @@ func writePartial(
 						os.Exit(int(unix.EIO))
 					}
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
+						// fmt.Fprintf(os.Stderr, "Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
 					} else {
 						fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
 					}
@@ -213,7 +207,6 @@ func writePartial(
 				}
 			}
 			timeDownloadingMilli += float64(time.Since(chunkStartTime).Milliseconds())
-			moreToWrite <- true
 		}()
 
 		// wait for our turn to write to shared pipe
@@ -221,24 +214,11 @@ func writePartial(
 
 		// Logic to write our current chunk
 		for !ChunkFinished(reader.CurChunkStart, totalWritten, size, chunkSize) {
-			if ChunkFinished(reader.CurChunkStart, totalRead, size, chunkSize) {
-				// This worker has read its entire chunk off the wire, pipe the rest to writer in a single call
-				if written, err := io.Copy(writer, bytes.NewReader(buf[totalWritten:totalRead])); err != nil {
-					log.Fatal("io copy failed:", err.Error())
-				} else {
-					totalWritten += int64(written)
-				}
+			buf := <-data
+			if written, err := writer.Write(buf); err != nil {
+				log.Fatal("write failed:", err.Error())
 			} else {
-				// Worker hasn't finished reading entire chunk but it's our turn to write. Eagerly
-				// write what we have so far.
-				// Avoid spinning until there's something to write, wait for reader thread to
-				// tell us it has something.
-				<-moreToWrite
-				if written, err := writer.Write(buf[totalWritten:totalRead]); err != nil {
-					log.Fatal("partial write failed:", err.Error())
-				} else {
-					totalWritten += int64(written)
-				}
+				totalWritten += int64(written)
 			}
 		}
 
