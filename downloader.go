@@ -195,8 +195,8 @@ func writePartial(
 				// For accurately enforcing very high min speeds, check if the entire chunk is done in time
 				var chunkTimedOut = elapsedMilli > maxTimeForChunkMilli
 				// For enforcing very low min speeds in a reasonable amount of time, verify we're meeting the min speed
-				// after a second.
-				var chunkTooSlowSoFar = elapsedMilli > 1000 && float64(totalRead)/elapsedMilli < minSpeedBytesPerMillisecond
+				// after 5 seconds.
+				var chunkTooSlowSoFar = elapsedMilli > 5000 && float64(totalRead)/elapsedMilli < minSpeedBytesPerMillisecond
 				if chunkTimedOut || chunkTooSlowSoFar || err != nil {
 					if attemptNumber > opts.RetryCount {
 						fmt.Fprintln(os.Stderr, "Too many slow/stalled/failed connections for this chunk, giving up.")
@@ -253,4 +253,5 @@ func writePartial(
 		}
 		reader.AdvanceNextChunk()
 	}
+	fmt.Fprintf(os.Stderr, "Worker %d total download speed %.3fMBps\n", workerNum, totalDownloaded/1e3/timeDownloadingMilli)
 }
