@@ -23,20 +23,20 @@ type S3Downloader struct {
 
 func (s3Downloader S3Downloader) GetFileInfo() (int64, bool, bool) {
 	req, resp := s3Downloader.generateRequestResponse(nil)
-	handleAwsError(req.Send())
+	sendAwsRequest(req)
 	return *resp.ContentLength, true, false
 }
 
 func (s3Downloader S3Downloader) Get() io.ReadCloser {
 	req, resp := s3Downloader.generateRequestResponse(nil)
-	handleAwsError(req.Send())
+	sendAwsRequest(req)
 	return resp.Body
 }
 
 func (s3Downloader S3Downloader) GetRange(start, end int64) io.ReadCloser {
 	rangeString := GenerateRangeString([][]int64{{start, end}})
 	req, resp := s3Downloader.generateRequestResponse(&rangeString)
-	handleAwsError(req.Send())
+	sendAwsRequest(req)
 	return resp.Body
 }
 
@@ -65,7 +65,8 @@ func getBucketAndKey(url string) (string, string) {
 	return bucket, key
 }
 
-func handleAwsError(err error) {
+func sendAwsRequest(req *request.Request) {
+	err := req.Send()
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
@@ -77,6 +78,6 @@ func handleAwsError(err error) {
 				os.Exit(int(unix.ENOENT))
 			}
 		}
-		log.Fatal("AWS request failed: ", err.Error())
+		log.Fatal("AWS request failed, requestID: ", req.RequestID, ", error: ", err.Error())
 	}
 }
