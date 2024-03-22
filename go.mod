@@ -6,10 +6,12 @@ require (
 	cloud.google.com/go v0.111.0 // indirect
 	cloud.google.com/go/storage v1.35.1
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/aws/aws-sdk-go v1.49.0
+	github.com/aws/aws-sdk-go-v2 v1.26.0
+	github.com/aws/aws-sdk-go-v2/config v1.27.9
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.53.0
 	github.com/didip/tollbooth v4.0.2+incompatible
 	github.com/frankban/quicktest v1.14.6 // indirect
-	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
+	github.com/googleapis/gax-go/v2 v2.12.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pierrec/lz4 v2.6.1+incompatible

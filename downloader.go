@@ -15,9 +15,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"golang.org/x/sys/unix"
 	"google.golang.org/api/option"
 )
@@ -73,7 +72,15 @@ func GetDownloader(url string) Downloader {
 	}
 
 	if strings.HasPrefix(url, "s3") {
-		return S3Downloader{url, s3.New(session.Must(session.NewSession(&aws.Config{HTTPClient: &httpClient})))}
+		cfg, err := config.LoadDefaultConfig(context.Background())
+		if err != nil {
+			log.Fatal("Failed to load s3 config: ", err)
+		}
+		client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.HTTPClient = &httpClient
+			o.RetryMaxAttempts = opts.RetryCount
+		})
+		return S3Downloader{url, client}
 	} else if strings.HasPrefix(url, "gs") {
 		ctx := context.Background()
 		options := []option.ClientOption{}
