@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"golang.org/x/sys/unix"
@@ -59,7 +60,7 @@ type Downloader interface {
 	GetRanges(ranges [][]int64) (*multipart.Reader, error)
 }
 
-func GetDownloader(url string) Downloader {
+func GetDownloader(url string, useFips bool) Downloader {
 	// NOTE: Only S3 + HTTP downloaders use this transport. GCS uses the default transport configured by the SDK.
 	var netTransport = &http.Transport{
 		Dial: (&net.Dialer{
@@ -79,6 +80,9 @@ func GetDownloader(url string) Downloader {
 		client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.HTTPClient = &httpClient
 			o.RetryMaxAttempts = opts.RetryCount
+			if useFips {
+				o.EndpointOptions.UseFIPSEndpoint = aws.FIPSEndpointStateEnabled
+			}
 		})
 		return S3Downloader{url, client}
 	} else if strings.HasPrefix(url, "gs") {

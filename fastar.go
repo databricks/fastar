@@ -33,6 +33,7 @@ var opts struct {
 	IgnoreNodeFiles bool              `long:"ignore-node-files" description:"Don't throw errors on character or block device nodes"`
 	Overwrite       bool              `long:"overwrite" description:"Overwrite any existing files"`
 	Headers         map[string]string `long:"headers" short:"H" description:"Headers to use with http request"`
+	UseFips         bool              `long:"use-fips-endpoint" description:"Use FIPS endpoint when downloading from S3"`
 }
 
 var minSpeedBytesPerMillisecond = 0.0
@@ -66,7 +67,7 @@ func main() {
 	var rawUrl = args[0]
 	processMinSpeedFlag()
 	opts.ChunkSize *= 1e6 // Convert chunk size from MB to B
-	fileStream := GetDownloadStream(GetDownloader(rawUrl), opts.ChunkSize, opts.NumWorkers)
+	fileStream := GetDownloadStream(GetDownloader(rawUrl, opts.UseFips), opts.ChunkSize, opts.NumWorkers)
 
 	url, err := url.Parse(rawUrl)
 	if err != nil {
