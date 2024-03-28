@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Used to limit the number of background workers writing
@@ -19,6 +21,9 @@ import (
 // to take, this token is then returned to the channel when
 // the background writer thread is finished.
 var openFileTokens chan bool
+
+var bytesWritten atomic.Uint64
+var writeTimeMilli atomic.Uint64
 
 func ExtractTar(stream io.Reader) {
 	openFileTokens = make(chan bool, opts.WriteWorkers)
@@ -33,6 +38,8 @@ func ExtractTar(stream io.Reader) {
 	// all existing writes to finish (one of them might be the file
 	// we need to link to).
 	var wg sync.WaitGroup
+
+	var lastLog = time.Now()
 
 	for {
 		header, err := tarReader.Next()
@@ -120,6 +127,10 @@ func ExtractTar(stream io.Reader) {
 					header.Name)
 			}
 		}
+		if (uint64)(time.Since(lastLog).Seconds()) >= 30 {
+			fmt.Fprintf(os.Stderr, "Average write speed %.3fMBps\n", (float64)(bytesWritten.Load())/1e3/(float64(writeTimeMilli.Load())))
+			lastLog = time.Now()
+		}
 	}
 	// Wait for all threads to finish, otherwise fastar
 	// might exit before last few files done writing.
@@ -129,6 +140,7 @@ func ExtractTar(stream io.Reader) {
 func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() { openFileTokens <- true }()
+	var writeStartTime = time.Now()
 	if opts.Overwrite {
 		if _, err := os.Stat(filename); err == nil {
 			os.Remove(filename)
@@ -145,6 +157,8 @@ func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.Wa
 	if err != nil {
 		log.Fatal("Copy file failed: ", err.Error())
 	}
+	bytesWritten.Add((uint64)(len(buf)))
+	writeTimeMilli.Add(uint64(time.Since(writeStartTime).Milliseconds()))
 }
 
 func hardLink(newPath string, path string, header *tar.Header, wg *sync.WaitGroup) {
