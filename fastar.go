@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log"
 	"net/url"
@@ -29,6 +28,7 @@ var opts struct {
 	RetryWait       int               `long:"retry-wait" default:"1" description:"Starting number of seconds to wait in between retries (2x every retry)"`
 	MaxWait         int               `long:"max-wait" default:"10" description:"Exponential retry wait is capped at this many seconds"`
 	MinSpeed        string            `long:"min-speed" default:"1K" description:"Minimum speed per each chunk download. Retries and then fails if any are slower than this. 0 for no min speed, append K or M for KBps or MBps"`
+	MinSpeedWait    int               `long:"min-speed-wait" default:"5" description:"How long to wait for download to stabilize before enforcing min speed"`
 	ConnTimeout     int               `long:"connection-timeout" default:"60" description:"Abort download if TCP dial takes longer than this many seconds. Only supported for S3 and HTTP schemes."`
 	IgnoreNodeFiles bool              `long:"ignore-node-files" description:"Don't throw errors on character or block device nodes"`
 	Overwrite       bool              `long:"overwrite" description:"Overwrite any existing files"`
@@ -75,10 +75,10 @@ func main() {
 	}
 	filename := path.Base(url.Path)
 
-	fmt.Fprintln(os.Stderr, "File name: "+filename)
-	fmt.Fprintln(os.Stderr, "Num Download Workers: "+strconv.Itoa(opts.NumWorkers))
-	fmt.Fprintln(os.Stderr, "Chunk Size (Mib): "+strconv.FormatInt(opts.ChunkSize/1e6, 10))
-	fmt.Fprintln(os.Stderr, "Num Disk Workers: "+strconv.Itoa(opts.WriteWorkers))
+	log.Println("File name: "+filename)
+	log.Printf("Num Download Workers: %d", opts.NumWorkers)
+	log.Printf("Chunk Size (Mib): %d", opts.ChunkSize/1e6)
+	log.Printf("Num Disk Workers: %d", opts.WriteWorkers)
 
 	magicNumber, splicedStream := getMagicNumber(fileStream)
 
@@ -141,35 +141,35 @@ func getMagicNumber(reader io.Reader) (string, io.Reader) {
 func getCompressionType(filename string, magicNumber string) CompressionType {
 	if opts.Compression != "" {
 		if opts.Compression == "tar" {
-			fmt.Fprintln(os.Stderr, "Forcing raw tar")
+			log.Println("Forcing raw tar")
 			return Tar
 		} else if opts.Compression == "gzip" {
-			fmt.Fprintln(os.Stderr, "Forcing gzip")
+			log.Println("Forcing gzip")
 			return Gzip
 		} else {
-			fmt.Fprintln(os.Stderr, "Forcing lz4")
+			log.Println("Forcing lz4")
 			return Lz4
 		}
 	} else {
 		if strings.HasPrefix(magicNumber, gzipMagicNumber) {
-			fmt.Fprintln(os.Stderr, "Inferring gzip by magic number")
+			log.Println("Inferring gzip by magic number")
 			return Gzip
 		} else if strings.HasPrefix(magicNumber, lz4MagicNumber) {
-			fmt.Fprintln(os.Stderr, "Inferring lz4 by magic number")
+			log.Println("Inferring lz4 by magic number")
 			return Lz4
 		} else {
-			fmt.Fprintln(os.Stderr, "Unrecognized magic number, falling back to file extension")
+			log.Println("Unrecognized magic number, falling back to file extension")
 			if strings.HasSuffix(filename, "lz4") {
-				fmt.Fprintln(os.Stderr, "Inferring lz4 by file extension")
+				log.Println("Inferring lz4 by file extension")
 				return Lz4
 			} else if strings.HasSuffix(filename, "gz") {
-				fmt.Fprintln(os.Stderr, "Inferring gzip by file extension")
+				log.Println("Inferring gzip by file extension")
 				return Gzip
 			} else if strings.HasSuffix(filename, "tar") {
-				fmt.Fprintln(os.Stderr, "Inferring raw tar by file extension")
+				log.Println("Inferring raw tar by file extension")
 				return Tar
 			} else {
-				fmt.Fprintln(os.Stderr, "Unrecognized file extension, assuming raw tar")
+				log.Println("Unrecognized file extension, assuming raw tar")
 				return Tar
 			}
 		}

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
@@ -53,7 +52,7 @@ func (s3Downloader S3Downloader) getObject(rangeString *string) *s3.GetObjectOut
 	resp, err := s3Downloader.client.GetObject(context.Background(), params)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
-			fmt.Fprintln(os.Stderr, "404, fast failing:", err.Error())
+			log.Println("404, fast failing:", err.Error())
 			os.Exit(int(unix.ENOENT))
 		}
 		log.Fatal("Unexpected error getting S3 object: ", err.Error())

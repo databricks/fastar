@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -106,14 +105,14 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 				return err
 			}
 			if curResp.StatusCode < 200 || curResp.StatusCode > 299 {
-				fmt.Fprintf(os.Stderr, "failed response: %+v\n", *curResp)
+				log.Printf("failed response: %+v\n", *curResp)
 				if curResp.ContentLength != 0 {
 					if body, err := ioutil.ReadAll(curResp.Body); err == nil {
-						fmt.Fprintln(os.Stderr, "response body:", string(body))
+						log.Println("response body:", string(body))
 					}
 				}
 				if curResp.StatusCode == 404 {
-					fmt.Fprintln(os.Stderr, "404, file not found")
+					log.Println("404, file not found")
 					os.Exit(int(unix.ENOENT))
 				}
 				// Azure blob storage can return either 429 or 503 when throttling
@@ -133,7 +132,7 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 		retry.MaxDelay(time.Second*time.Duration(opts.MaxWait)),
 	)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed get request:", err.Error())
+		log.Println("Failed get request:", err.Error())
 		if throttled {
 			os.Exit(int(unix.EBUSY))
 		} else {

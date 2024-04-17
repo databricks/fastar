@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
@@ -115,7 +114,7 @@ func GetDownloader(url string, useFips bool) Downloader {
 // RANGE requests or if the total file is smaller than a single download chunk.
 func GetDownloadStream(downloader Downloader, chunkSize int64, numWorkers int) io.Reader {
 	var size, supportsRange, supportsMultipart = downloader.GetFileInfo()
-	fmt.Fprintln(os.Stderr, "File Size (MiB): "+strconv.FormatInt(size/1e6, 10))
+	log.Printf("File Size (MiB): %d", size/1e6)
 	if !supportsRange || size < chunkSize {
 		return downloader.Get()
 	}
@@ -172,8 +171,6 @@ func writePartial(
 	// Keep track of how many times we've tried to connect to download server for current chunk.
 	// Used for limiting retries on slow/stalled network connections.
 	var attemptNumber = 1
-	// At most how long should this chunk take to download with the given min speed.
-	var maxTimeForChunkMilli = float64(chunkSize) / minSpeedBytesPerMillisecond
 
 	// Used for logging periodic download speed stats
 	var timeDownloadingMilli = float64(0)
@@ -202,6 +199,7 @@ func writePartial(
 		// Async thread to read off the network into in memory buffer
 		go func() {
 			var chunkStartTime = time.Now()
+			var attemptStartTime = time.Now()
 			for {
 				if totalRead > totalWritten && len(moreToWrite) == 0 {
 					moreToWrite <- true
@@ -220,30 +218,31 @@ func writePartial(
 					reader.Close()
 					break
 				}
-				var elapsedMilli = float64(time.Since(chunkStartTime).Milliseconds())
+				var chunkElapsedMilli = float64(time.Since(chunkStartTime).Milliseconds())
+				var attemptElapsedMilli = float64(time.Since(attemptStartTime).Milliseconds())
 				if time.Since(lastLogTime).Seconds() >= 30 {
-					var timeSoFarSec = (timeDownloadingMilli + elapsedMilli) / 1000
-					fmt.Fprintf(os.Stderr, "Worker %d downloading average %.3fMBps\n", workerNum, totalDownloaded/1e6/timeSoFarSec)
+					var timeSoFarSec = (timeDownloadingMilli + chunkElapsedMilli) / 1000
+					log.Printf("Worker %d downloading average %.3fMBps\n", workerNum, totalDownloaded/1e6/timeSoFarSec)
 					lastLogTime = time.Now()
 				}
-				// For accurately enforcing very high min speeds, check if the entire chunk is done in time
-				var chunkTimedOut = elapsedMilli > maxTimeForChunkMilli
-				// For enforcing very low min speeds in a reasonable amount of time, verify we're meeting the min speed
-				// after 5 seconds.
-				var chunkTooSlowSoFar = elapsedMilli > 5000 && float64(totalRead)/elapsedMilli < minSpeedBytesPerMillisecond
-				if chunkTimedOut || chunkTooSlowSoFar || err != nil {
+				// For enforcing very low min speeds in a reasonable amount of time, verify our avg speed is fast enough
+				// after MinSpeedWait seconds.
+				var chunkTooSlowSoFar = attemptElapsedMilli > float64(opts.MinSpeedWait)*1000 && float64(totalRead)/chunkElapsedMilli < minSpeedBytesPerMillisecond
+				if chunkTooSlowSoFar || err != nil {
 					if attemptNumber > opts.RetryCount {
-						fmt.Fprintln(os.Stderr, "Too many slow/stalled/failed connections for this chunk, giving up.")
+						log.Printf("Too many slow/stalled/failed connections for worker %d's chunk, giving up.", workerNum)
 						os.Exit(int(unix.EIO))
 					}
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
+						log.Printf("Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
 					} else {
-						fmt.Fprintf(os.Stderr, "Worker %d timed out on current chunk, resetting connection\n", workerNum)
+						log.Printf("Worker %d too slow so far for current chunk, resetting connection\n", workerNum)
 					}
 					reader.Reset(reader.CurChunkStart + totalRead)
 					reader.RequestChunk()
 					attemptNumber++
+					// Reset timing related info relative to what we have left to download for this chunk
+					attemptStartTime = time.Now()
 				}
 			}
 			timeDownloadingMilli += float64(time.Since(chunkStartTime).Milliseconds())
@@ -287,5 +286,5 @@ func writePartial(
 		}
 		reader.AdvanceNextChunk()
 	}
-	fmt.Fprintf(os.Stderr, "Worker %d total download speed %.3fMBps\n", workerNum, totalDownloaded/1e3/timeDownloadingMilli)
+	log.Printf("Worker %d total download speed %.3fMBps\n", workerNum, totalDownloaded/1e3/timeDownloadingMilli)
 }

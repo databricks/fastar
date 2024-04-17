@@ -3,12 +3,10 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"math/rand"
 	"mime/multipart"
-	"os"
 )
 
 // Helper struct to abstract away the complexity of single vs multi part
@@ -89,7 +87,7 @@ func (r *Reader) Close() error {
 	} else if !r.UseMultipart() && r.Chunk != nil {
 		return r.Chunk.Close()
 	} else {
-		fmt.Fprintln(os.Stderr, "Attempting to close nil chunk, silently succeeding")
+		log.Println("Attempting to close nil chunk, silently succeeding")
 		return nil
 	}
 }

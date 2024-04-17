@@ -77,11 +77,11 @@ func handleGcsError(err error, requestType string) {
 		isErrObjNotFound := strings.Contains(err.Error(), "object doesn't exist")
 		if e, ok := err.(*googleapi.Error); ok || isErrObjNotFound {
 			if isErrObjNotFound {
-				fmt.Fprintf(os.Stderr, "404, %s failed, GCS object doesn't exist\n", requestType)
+				log.Printf("404, %s failed, GCS object doesn't exist\n", requestType)
 				os.Exit(int(unix.ENOENT))
 			}
 			if e.Code == 404 {
-				fmt.Fprintf(os.Stderr, "404, %s failed, GCS object or bucket doesn't exist\n", requestType)
+				log.Printf("404, %s failed, GCS object or bucket doesn't exist\n", requestType)
 				os.Exit(int(unix.ENOENT))
 			}
 		}

@@ -3,7 +3,6 @@ package main
 import (
 	"archive/tar"
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -113,8 +112,7 @@ func ExtractTar(stream io.Reader) {
 			os.Lchown(path, header.Uid, header.Gid)
 		default:
 			if opts.IgnoreNodeFiles {
-				fmt.Fprintln(
-					os.Stderr,
+				log.Println(
 					"ExtractTarGz: uknown type:",
 					string(header.Typeflag),
 					" in ",
@@ -128,7 +126,7 @@ func ExtractTar(stream io.Reader) {
 			}
 		}
 		if (uint64)(time.Since(lastLog).Seconds()) >= 30 {
-			fmt.Fprintf(os.Stderr, "Average write speed %.3fMBps\n", (float64)(bytesWritten.Load())/1e3/(float64(writeTimeMilli.Load())))
+			log.Printf("Average write speed %.3fMBps\n", (float64)(bytesWritten.Load())/1e3/(float64(writeTimeMilli.Load())))
 			lastLog = time.Now()
 		}
 	}
