@@ -28,7 +28,7 @@ var opts struct {
 	RetryWait       int               `long:"retry-wait" default:"1" description:"Starting number of seconds to wait in between retries (2x every retry)"`
 	MaxWait         int               `long:"max-wait" default:"10" description:"Exponential retry wait is capped at this many seconds"`
 	MinSpeed        string            `long:"min-speed" default:"1K" description:"Minimum speed per each chunk download. Retries and then fails if any are slower than this. 0 for no min speed, append K or M for KBps or MBps"`
-	MinSpeedWait    int               `long:"min-speed-wait" default:"5" description:"How long to wait for download to stabilize before enforcing min speed"`
+	MinSpeedWait    int               `long:"min-speed-wait" default:"5" description:"How long to wait in seconds for download to stabilize before enforcing min speed"`
 	ConnTimeout     int               `long:"connection-timeout" default:"60" description:"Abort download if TCP dial takes longer than this many seconds. Only supported for S3 and HTTP schemes."`
 	IgnoreNodeFiles bool              `long:"ignore-node-files" description:"Don't throw errors on character or block device nodes"`
 	Overwrite       bool              `long:"overwrite" description:"Overwrite any existing files"`
@@ -75,7 +75,7 @@ func main() {
 	}
 	filename := path.Base(url.Path)
 
-	log.Println("File name: "+filename)
+	log.Println("File name: " + filename)
 	log.Printf("Num Download Workers: %d", opts.NumWorkers)
 	log.Printf("Chunk Size (Mib): %d", opts.ChunkSize/1e6)
 	log.Printf("Num Disk Workers: %d", opts.WriteWorkers)
