@@ -23,7 +23,7 @@ type HttpDownloader struct {
 }
 
 func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
-	req := httpDownloader.generateRequest()
+	req := httpDownloader.generateRequest("HEAD")
 	resp := httpDownloader.retryHttpRequest(req)
 
 	if resp.ContentLength > opts.ChunkSize {
@@ -37,6 +37,7 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
 			// even if they support RANGE. To determine, we intentionally make a
 			// request for less than the full size and see if it's respected.
 			body := httpDownloader.GetRange(0, 1)
+			defer body.Close()
 			buf, err := io.ReadAll(body)
 			return resp.ContentLength, (err == nil && len(buf) == 1), false
 		}
@@ -48,12 +49,12 @@ func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
 }
 
 func (httpDownloader HttpDownloader) Get() io.ReadCloser {
-	req := httpDownloader.generateRequest()
+	req := httpDownloader.generateRequest("GET")
 	return httpDownloader.retryHttpRequest(req).Body
 }
 
 func (httpDownloader HttpDownloader) GetRange(start, end int64) io.ReadCloser {
-	req := httpDownloader.generateRequest()
+	req := httpDownloader.generateRequest("GET")
 
 	rangeString := GenerateRangeString([][]int64{{start, end}})
 	req.Header.Add("Range", rangeString)
@@ -63,7 +64,7 @@ func (httpDownloader HttpDownloader) GetRange(start, end int64) io.ReadCloser {
 }
 
 func (httpDownloader HttpDownloader) GetRanges(ranges [][]int64) (*multipart.Reader, error) {
-	req := httpDownloader.generateRequest()
+	req := httpDownloader.generateRequest("GET")
 
 	rangeString := GenerateRangeString(ranges)
 	if len(ranges) != 0 {
@@ -74,17 +75,19 @@ func (httpDownloader HttpDownloader) GetRanges(ranges [][]int64) (*multipart.Rea
 
 	mediaType, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
+		resp.Body.Close()
 		return nil, errors.New("error parsing content type, multipart likely not supported")
 	}
 
 	if strings.HasPrefix(mediaType, "multipart/") {
 		return multipart.NewReader(resp.Body, params["boundary"]), nil
 	}
+	resp.Body.Close()
 	return nil, errors.New("multipart not supported in content type")
 }
 
-func (httpDownloader HttpDownloader) generateRequest() *http.Request {
-	req, err := http.NewRequest("GET", httpDownloader.Url, nil)
+func (httpDownloader HttpDownloader) generateRequest(requestMethod string) *http.Request {
+	req, err := http.NewRequest(requestMethod, httpDownloader.Url, nil)
 	if err != nil {
 		log.Fatal("Failed creating GET request:", err.Error())
 	}
