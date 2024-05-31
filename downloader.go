@@ -115,6 +115,8 @@ func GetDownloader(url string, useFips bool) Downloader {
 func GetDownloadStream(downloader Downloader, chunkSize int64, numWorkers int) io.Reader {
 	var size, supportsRange, supportsMultipart = downloader.GetFileInfo()
 	log.Printf("File Size (MiB): %d", size/1e6)
+	log.Println("Supports RANGE:", supportsRange)
+	log.Println("Supports multipart RANGE:", supportsMultipart)
 	if !supportsRange || size < chunkSize {
 		return downloader.Get()
 	}
