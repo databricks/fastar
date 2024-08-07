@@ -1,0 +1,45 @@
+Copyright (2024) Databricks, Inc.
+
+This Software includes software developed at Databricks (https://www.databricks.com/) and its use is subject to the included LICENSE file.
+
+________________
+This Software contains code from the following open source projects, licensed under the Apache 2.0 license (https://www.apache.org/licenses/LICENSE-2.0):
+
+aws/aws-sdk-go-v2 - https://github.com/aws/aws-sdk-go-v2
+Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+Copyright 2014-2015 Stripe, Inc.
+
+googleapis/google-cloud-go - https://github.com/googleapis/google-cloud-go
+Copyright google-cloud-go authors. 
+
+________________
+This Software contains code from the following open source projects, licensed under the MIT license (https://opensource.org/license/mit):
+
+didip/tollbooth - https://github.com/didip/tollbooth
+Copyright (c) 2015 Didip Kerabat
+
+avast/retry-go - https://github.com/avast/retry-go
+Copyright (c) 2017 Avast
+
+________________
+This Software contains code from the following open source projects, licensed under the BSD 3 Clause license (https://opensource.org/license/bsd-3-clause):
+
+jessevdk/go-flags - https://github.com/jessevdk/go-flags
+Copyright (c) 2012 Jesse van den Kieboom. All rights reserved.
+
+pierrec/lz4 - https://github.com/pierrec/lz4
+Copyright (c) 2015, Pierre Curto. All rights reserved.
+
+golang/oauth2 - https://github.com/golang/oauth2
+Copyright 2009 The Go Authors.
+
+golang/go - https://github.com/golang/go
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+googleapis/google-api-go-client - https://github.com/googleapis/google-api-go-client
+Copyright (c) 2011 Google Inc. All rights reserved.
+
+googleapis/gax-go - https://github.com/googleapis/gax-go
+Copyright 2016, Google Inc. All rights reserved.
+
+
