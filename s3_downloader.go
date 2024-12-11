@@ -54,6 +54,12 @@ func (s3Downloader S3Downloader) getObject(rangeString *string) *s3.GetObjectOut
 		if strings.Contains(err.Error(), "404") {
 			log.Println("404, fast failing:", err.Error())
 			os.Exit(int(unix.ENOENT))
+		} else if strings.Contains(err.Error(), "SignatureDoesNotMatch") {
+			log.Println("Failed to authenticate:", err.Error())
+			os.Exit(int(unix.EACCES))
+		} else if strings.Contains(err.Error(), "no VPC endpoint policy allows") {
+			log.Println("Failed to reach bucket due to VPC endpoint misconfiguration:", err.Error())
+			os.Exit(int(unix.EHOSTUNREACH))
 		}
 		log.Fatal("Unexpected error getting S3 object: ", err.Error())
 	}
