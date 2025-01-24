@@ -184,7 +184,7 @@ func writePartial(
 
 	// Used for logging periodic download speed stats
 	var timeDownloadingMilli = float64(0)
-	var totalDownloaded = float64(0)
+	var totalReadForWorker = float64(0)
 	var lastLogTime = time.Now()
 
 	// Read data off the wire and into an in memory buffer to greedily
@@ -200,18 +200,24 @@ func writePartial(
 			attemptNumber = 1
 		}
 
-		var totalRead = int64(0)
-		var totalWritten = int64(0)
+		var totalReadForChunk = int64(0)
+		var totalWrittenForChunk = int64(0)
 
 		// Used by reader thread to tell writer there's more data it can pipe out
-		moreToWrite := make(chan bool, 1)
+		var moreToWrite = make(chan bool, 1)
 
 		// Async thread to read off the network into in memory buffer
 		go func() {
-			var chunkStartTime = time.Now()
+			// Time spent downloading chunk not including current attempt
+			var chunkElapsedMilli = float64(0)
+			// Time spent on this attempt downloading chunk
 			var attemptStartTime = time.Now()
+			var totalReadForAttempt = float64(0)
+			var timeSpentOnChunk = func() float64 {
+				return chunkElapsedMilli + float64(time.Since(attemptStartTime).Milliseconds())
+			}
 			for {
-				if totalRead > totalWritten && len(moreToWrite) == 0 {
+				if totalReadForChunk > totalWrittenForChunk && len(moreToWrite) == 0 {
 					moreToWrite <- true
 				}
 				var read int
@@ -220,42 +226,49 @@ func writePartial(
 				// for every single chunk, resulting in a ~30% slowdown.
 				// We also wouldn't be able to enforce min speeds as there's no way to
 				// MITM ReadAll().
-				read, err = reader.Read(buf[totalRead:])
-				totalRead += int64(read)
-				totalDownloaded += float64(read)
+				read, err = reader.Read(buf[totalReadForChunk:])
+				totalReadForAttempt += float64(read)
+				totalReadForChunk += int64(read)
+				totalReadForWorker += float64(read)
+
 				// Make sure to handle bytes read before error handling, Read() can return successful bytes and error in the same call.
-				if ChunkFinished(reader.CurChunkStart, totalRead, size, chunkSize) {
+				if ChunkFinished(reader.CurChunkStart, totalReadForChunk, size, chunkSize) {
 					reader.Close()
 					break
 				}
-				var chunkElapsedMilli = float64(time.Since(chunkStartTime).Milliseconds())
-				var attemptElapsedMilli = float64(time.Since(attemptStartTime).Milliseconds())
+
 				if time.Since(lastLogTime).Seconds() >= 30 {
-					var timeSoFarSec = (timeDownloadingMilli + chunkElapsedMilli) / 1000
-					log.Printf("Worker %d downloading average %.3fMBps\n", workerNum, totalDownloaded/1e6/timeSoFarSec)
+					var timeSoFarSec = (timeDownloadingMilli + timeSpentOnChunk()) / 1e3
+					log.Printf("Worker %d downloading average %.3fMBps\n", workerNum, totalReadForWorker/1e6/timeSoFarSec)
 					lastLogTime = time.Now()
 				}
+
 				// For enforcing very low min speeds in a reasonable amount of time, verify our avg speed is fast enough
 				// after MinSpeedWait seconds.
-				var chunkTooSlowSoFar = attemptElapsedMilli > float64(opts.MinSpeedWait)*1000 && float64(totalRead)/chunkElapsedMilli < minSpeedBytesPerMillisecond
+				var attemptTimeMilli = float64(time.Since(attemptStartTime).Milliseconds())
+				var attemptReadSpeed = totalReadForAttempt / attemptTimeMilli
+				var chunkTooSlowSoFar = attemptTimeMilli/1e3 > float64(opts.MinSpeedWait) && attemptReadSpeed < minSpeedBytesPerMillisecond
 				if chunkTooSlowSoFar || err != nil {
 					if attemptNumber > opts.RetryCount {
 						log.Printf("Too many slow/stalled/failed connections for worker %d's chunk, giving up.", workerNum)
+						log.Printf("Worker %d final download speed %.3fMBps\n", workerNum, totalReadForWorker/1e3/(timeDownloadingMilli+timeSpentOnChunk()))
 						os.Exit(int(unix.EIO))
 					}
 					if err != nil {
 						log.Printf("Worker %d failed to read current chunk, resetting connection: %s\n", workerNum, err.Error())
 					} else {
-						log.Printf("Worker %d too slow so far for current chunk, resetting connection\n", workerNum)
+						log.Printf("Worker %d too slow so far for current chunk (download attempt averaged %.3fMBps), resetting connection\n", workerNum, attemptReadSpeed/1e3)
 					}
-					reader.Reset(reader.CurChunkStart + totalRead)
+					// Reset info relative to what we have left to download for this chunk
+					reader.Reset(reader.CurChunkStart + totalReadForChunk)
 					reader.RequestChunk()
 					attemptNumber++
-					// Reset timing related info relative to what we have left to download for this chunk
+					chunkElapsedMilli += attemptTimeMilli
 					attemptStartTime = time.Now()
+					totalReadForAttempt = 0
 				}
 			}
-			timeDownloadingMilli += float64(time.Since(chunkStartTime).Milliseconds())
+			timeDownloadingMilli += timeSpentOnChunk()
 			moreToWrite <- true
 		}()
 
@@ -263,13 +276,13 @@ func writePartial(
 		<-curChan
 
 		// Logic to write our current chunk
-		for !ChunkFinished(reader.CurChunkStart, totalWritten, size, chunkSize) {
-			if ChunkFinished(reader.CurChunkStart, totalRead, size, chunkSize) {
+		for !ChunkFinished(reader.CurChunkStart, totalWrittenForChunk, size, chunkSize) {
+			if ChunkFinished(reader.CurChunkStart, totalReadForChunk, size, chunkSize) {
 				// This worker has read its entire chunk off the wire, pipe the rest to writer in a single call
-				if written, err := io.Copy(writer, bytes.NewReader(buf[totalWritten:totalRead])); err != nil {
+				if written, err := io.Copy(writer, bytes.NewReader(buf[totalWrittenForChunk:totalReadForChunk])); err != nil {
 					log.Fatal("io copy failed:", err.Error())
 				} else {
-					totalWritten += int64(written)
+					totalWrittenForChunk += int64(written)
 				}
 			} else {
 				// Worker hasn't finished reading entire chunk but it's our turn to write. Eagerly
@@ -277,10 +290,10 @@ func writePartial(
 				// Avoid spinning until there's something to write, wait for reader thread to
 				// tell us it has something.
 				<-moreToWrite
-				if written, err := writer.Write(buf[totalWritten:totalRead]); err != nil {
+				if written, err := writer.Write(buf[totalWrittenForChunk:totalReadForChunk]); err != nil {
 					log.Fatal("partial write failed:", err.Error())
 				} else {
-					totalWritten += int64(written)
+					totalWrittenForChunk += int64(written)
 				}
 			}
 		}
@@ -296,5 +309,5 @@ func writePartial(
 		}
 		reader.AdvanceNextChunk()
 	}
-	log.Printf("Worker %d total download speed %.3fMBps\n", workerNum, totalDownloaded/1e3/timeDownloadingMilli)
+	log.Printf("Worker %d final download speed %.3fMBps\n", workerNum, totalReadForWorker/1e3/timeDownloadingMilli)
 }
