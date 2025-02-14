@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"log"
 	"mime/multipart"
@@ -20,6 +21,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sys/unix"
 	"google.golang.org/api/option"
+	raw "google.golang.org/api/storage/v1"
+	htransport "google.golang.org/api/transport/http"
 )
 
 // Generate inclusive-inclusive range header string from the array
@@ -100,6 +103,20 @@ func GetDownloader(url string, useFips bool) Downloader {
 				&oauth2.Token{AccessToken: gcsAccessToken},
 			)
 			options = append(options, option.WithTokenSource(tokenSource))
+		}
+
+		if opts.DisableHttp2 {
+			// This disables HTTP/2 in transport.
+			netTransport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+
+			options = append(options, option.WithScopes(raw.DevstorageFullControlScope))
+			trans, err := htransport.NewTransport(ctx, netTransport, options...)
+			if err != nil {
+				log.Fatalf("Failed to create GCS transport: %s", err)
+			}
+			c := http.Client{Transport: trans}
+
+			options = append(options, option.WithHTTPClient(&c))
 		}
 
 		client, err := storage.NewClient(
