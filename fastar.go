@@ -34,7 +34,7 @@ var opts struct {
 	Overwrite       bool              `long:"overwrite" description:"Overwrite any existing files"`
 	Headers         map[string]string `long:"headers" short:"H" description:"Headers to use with http request"`
 	UseFips         bool              `long:"use-fips-endpoint" description:"Use FIPS endpoint when downloading from S3"`
-	DisableHttp2    bool              `long:"disable-http2" description:"Disable http2 to avoid reusing connections"`
+	DisableHttp2    bool              `long:"disable-http2" description:"Disable http2 to avoid reusing connections for GCS downloads"`
 }
 
 var minSpeedBytesPerMillisecond = 0.0
