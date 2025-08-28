@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"net/url"
@@ -15,6 +16,8 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/pierrec/lz4"
 )
+
+const version = "2.9.0"
 
 var opts struct {
 	NumWorkers      int               `long:"download-workers" default:"4" description:"How many parallel workers to download the file"`
@@ -35,6 +38,10 @@ var opts struct {
 	Headers         map[string]string `long:"headers" short:"H" description:"Headers to use with http request"`
 	UseFips         bool              `long:"use-fips-endpoint" description:"Use FIPS endpoint when downloading from S3"`
 	DisableHttp2    bool              `long:"disable-http2" description:"Disable http2 to avoid reusing connections for GCS downloads"`
+	SkipHead        bool              `long:"skip-head" description:"Skip HEAD request for HTTP downloads (useful for presigned URLs)"`
+	ContentLength   int64             `long:"content-length" description:"Content length to use when skipping HEAD request"`
+	AcceptRanges    string            `long:"accept-ranges" description:"Accept-Ranges header value to use when skipping HEAD request"`
+	Version         bool              `long:"version" description:"Show version information"`
 }
 
 var minSpeedBytesPerMillisecond = 0.0
@@ -62,6 +69,12 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to parse arguments: ", err)
 	}
+
+	if opts.Version {
+		fmt.Printf("fastar version %s\n", version)
+		os.Exit(0)
+	}
+
 	if len(args) == 0 {
 		log.Fatal("Please pass source URL to download file from")
 	}
