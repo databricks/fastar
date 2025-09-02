@@ -7,6 +7,8 @@ import (
 	"math"
 	"math/rand"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"strings"
 	"testing"
@@ -133,5 +135,141 @@ func TestMultipartRangeReader(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestHttpDownloaderGetFileInfo_SmallFileHeadRequest(t *testing.T) {
+	opts.SkipHead = false
+	opts.ChunkSize = 2000 // 2000 bytes > 1000 bytes file
+	opts.RetryCount = 1
+	opts.RetryWait = 1
+	opts.MaxWait = 5
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	downloader := HttpDownloader{
+		Url:    server.URL,
+		client: &http.Client{},
+	}
+
+	contentLength, acceptRanges, multipartSupported := downloader.GetFileInfo()
+
+	if contentLength != 1000 {
+		t.Errorf("Expected content length 1000, got %d", contentLength)
+	}
+	if acceptRanges {
+		t.Error("Expected accept ranges to be false for small files")
+	}
+	if multipartSupported {
+		t.Error("Expected multipartSupported to be false")
+	}
+}
+
+func TestHttpDownloaderGetFileInfo_LargeFileHeadRequest(t *testing.T) {
+	opts.SkipHead = false
+	opts.ChunkSize = 1000000 // 1MB < 2MB file
+	opts.RetryCount = 1
+	opts.RetryWait = 1
+	opts.MaxWait = 5
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "2000000") // 2MB file
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	downloader := HttpDownloader{
+		Url:    server.URL,
+		client: &http.Client{},
+	}
+
+	contentLength, acceptRanges, multipartSupported := downloader.GetFileInfo()
+
+	if contentLength != 2000000 {
+		t.Errorf("Expected content length 2000000, got %d", contentLength)
+	}
+	if !acceptRanges {
+		t.Error("Expected accept ranges to be true for large files")
+	}
+	if multipartSupported {
+		t.Error("Expected multipartSupported to be false")
+	}
+}
+
+func TestHttpDownloaderGetFileInfo_LargeFileSkipHead(t *testing.T) {
+	opts.SkipHead = true
+	opts.ContentLength = 2000000 // 2MB file
+	opts.AcceptRanges = "bytes"
+	opts.ChunkSize = 1000000 // 1MB chunk size < 2MB file
+
+	downloader := HttpDownloader{
+		Url:    "http://example.com", // URL doesn't matter for skip-head
+		client: &http.Client{},
+	}
+
+	contentLength, acceptRanges, multipartSupported := downloader.GetFileInfo()
+
+	if contentLength != 2000000 {
+		t.Errorf("Expected content length 2000000, got %d", contentLength)
+	}
+	if !acceptRanges {
+		t.Error("Expected accept ranges to be true")
+	}
+	if multipartSupported {
+		t.Error("Expected multipartSupported to be false")
+	}
+}
+
+func TestHttpDownloaderGetFileInfo_SmallFileSkipHead(t *testing.T) {
+	opts.SkipHead = true
+	opts.ContentLength = 500000 // 500KB file
+	opts.AcceptRanges = "bytes"
+	opts.ChunkSize = 1000000 // 1MB chunk size (larger than file)
+
+	downloader := HttpDownloader{
+		Url:    "http://example.com", // URL doesn't matter for skip-head
+		client: &http.Client{},
+	}
+
+	contentLength, acceptRanges, multipartSupported := downloader.GetFileInfo()
+
+	if contentLength != 500000 {
+		t.Errorf("Expected content length 500000, got %d", contentLength)
+	}
+	if acceptRanges {
+		t.Error("Expected accept ranges to be false for small files")
+	}
+	if multipartSupported {
+		t.Error("Expected multipartSupported to be false")
+	}
+}
+
+func TestHttpDownloaderGetFileInfo_SkipHeadEmptyAcceptRanges(t *testing.T) {
+	opts.SkipHead = true
+	opts.ContentLength = 2000000 // 2MB file
+	opts.AcceptRanges = ""       // Empty string should result in false
+	opts.ChunkSize = 1000000     // 1MB chunk size < 2MB file
+
+	downloader := HttpDownloader{
+		Url:    "http://example.com", // URL doesn't matter for skip-head
+		client: &http.Client{},
+	}
+
+	contentLength, acceptRanges, multipartSupported := downloader.GetFileInfo()
+
+	if contentLength != 2000000 {
+		t.Errorf("Expected content length 2000000, got %d", contentLength)
+	}
+	if acceptRanges {
+		t.Error("Expected accept ranges to be false when AcceptRanges is empty")
+	}
+	if multipartSupported {
+		t.Error("Expected multipartSupported to be false")
 	}
 }

@@ -23,20 +23,32 @@ type HttpDownloader struct {
 }
 
 func (httpDownloader HttpDownloader) GetFileInfo() (int64, bool, bool) {
-	req := httpDownloader.generateRequest("HEAD")
-	resp := httpDownloader.retryHttpRequest(req)
+	var contentLength int64
+	var acceptRanges bool
 
-	if resp.ContentLength > opts.ChunkSize {
+	if opts.SkipHead {
+		// Use provided content length and accept-ranges values
+		contentLength = opts.ContentLength
+		acceptRanges = opts.AcceptRanges != ""
+	} else {
+		req := httpDownloader.generateRequest("HEAD")
+		resp := httpDownloader.retryHttpRequest(req)
+
+		contentLength = resp.ContentLength
+		acceptRanges = resp.Header.Get("Accept-Ranges") != ""
+	}
+
+	if contentLength > opts.ChunkSize {
 		// Temporarily disable checking support for range/multipart. These checks
 		// initiate file downloads from azure blob storage even if we don't consume
 		// the whole body and this may be overloading their servers.
 		// TODO: see if there's some way to determine multipart range support without
 		// necessarily returning the whole file in the body.
-		return resp.ContentLength, resp.Header.Get("Accept-Ranges") != "", false
+		return contentLength, acceptRanges, false
 	} else {
 		// If the file is tiny it doesn't matter if we support any kind
 		// of range request
-		return resp.ContentLength, false, false
+		return contentLength, false, false
 	}
 }
 
