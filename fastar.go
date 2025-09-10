@@ -36,6 +36,7 @@ var opts struct {
 	UseFips         bool              `long:"use-fips-endpoint" description:"Use FIPS endpoint when downloading from S3"`
 	DisableHttp2    bool              `long:"disable-http2" description:"Disable http2 to avoid reusing connections for GCS downloads"`
 	UseGetForSize   bool              `long:"use-get-for-size" description:"Use GET with Range header instead of HEAD to determine file size for HTTP(S) URLs. Assumes RANGE support on the server side."`
+	ExitStatusCodes []int             `long:"exit-status-codes" description:"HTTP status codes that should cause fastar to exit early. Specify each code separately (e.g. --exit-status-codes=401 --exit-status-codes=403)"`
 }
 
 var minSpeedBytesPerMillisecond = 0.0

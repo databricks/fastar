@@ -147,6 +147,12 @@ func (httpDownloader HttpDownloader) retryHttpRequest(req *http.Request) *http.R
 					log.Println("404, file not found")
 					os.Exit(int(unix.ENOENT))
 				}
+				// Check for user-configured exit status codes
+				for _, exitCode := range opts.ExitStatusCodes {
+					if curResp.StatusCode == exitCode {
+						log.Fatalf("HTTP %d encountered, exiting as configured", curResp.StatusCode)
+					}
+				}
 				// Azure blob storage can return either 429 or 503 when throttling
 				// https://learn.microsoft.com/en-us/azure/storage/blobs/scalability-targets
 				if curResp.StatusCode == 429 || curResp.StatusCode == 503 {

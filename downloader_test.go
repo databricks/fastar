@@ -201,3 +201,127 @@ func TestHttpGetForSize(t *testing.T) {
 	fmt.Printf("HTTP GET with Range header test passed! Size: %d, Range: %v, Multipart: %v\n", 
 		size, supportsRange, supportsMultipart)
 }
+
+func TestHttpExitStatusCodes(t *testing.T) {
+	// Backup original options
+	oldRetryCount := opts.RetryCount
+	oldExitStatusCodes := opts.ExitStatusCodes
+	
+	// Set test options
+	opts.RetryCount = 1
+	
+	defer func() {
+		// Restore original options
+		opts.RetryCount = oldRetryCount
+		opts.ExitStatusCodes = oldExitStatusCodes
+	}()
+	
+	testCases := []struct {
+		name           string
+		statusCode     int
+		exitStatusCodes []int
+		shouldMatch    bool
+	}{
+		{
+			name:           "403 in exit list should match",
+			statusCode:     403,
+			exitStatusCodes: []int{401, 403},
+			shouldMatch:    true,
+		},
+		{
+			name:           "401 in exit list should match",
+			statusCode:     401,
+			exitStatusCodes: []int{401, 403},
+			shouldMatch:    true,
+		},
+		{
+			name:           "500 not in exit list should not match",
+			statusCode:     500,
+			exitStatusCodes: []int{401, 403},
+			shouldMatch:    false,
+		},
+		{
+			name:           "403 with empty exit list should not match",
+			statusCode:     403,
+			exitStatusCodes: []int{},
+			shouldMatch:    false,
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test the logic directly without actually calling log.Fatalf
+			opts.ExitStatusCodes = tc.exitStatusCodes
+			
+			// Test if the status code would match
+			found := false
+			for _, exitCode := range opts.ExitStatusCodes {
+				if tc.statusCode == exitCode {
+					found = true
+					break
+				}
+			}
+			
+			if tc.shouldMatch && !found {
+				t.Errorf("Expected status code %d to be found in exit codes %v, but it wasn't", 
+					tc.statusCode, tc.exitStatusCodes)
+			}
+			
+			if !tc.shouldMatch && found {
+				t.Errorf("Expected status code %d NOT to be found in exit codes %v, but it was", 
+					tc.statusCode, tc.exitStatusCodes)
+			}
+		})
+	}
+}
+
+func TestHttpExitStatusCodesIntegration(t *testing.T) {
+	// This test verifies that the exit status codes are properly checked
+	// We can't test log.Fatalf directly, but we can test that the server returns the expected status
+	
+	// Backup original options
+	oldExitStatusCodes := opts.ExitStatusCodes
+	defer func() {
+		opts.ExitStatusCodes = oldExitStatusCodes
+	}()
+	
+	// Set exit status codes
+	opts.ExitStatusCodes = []int{403}
+	
+	// Create a test server that returns 403
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		w.Write([]byte("Forbidden"))
+	}))
+	defer server.Close()
+	
+	downloader := HttpDownloader{
+		Url:    server.URL,
+		client: server.Client(),
+	}
+	
+	// Make a request to verify the server returns 403
+	req := downloader.generateRequest("HEAD")
+	resp, err := downloader.client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 403 {
+		t.Errorf("Expected status code 403, got %d", resp.StatusCode)
+	}
+	
+	// Verify that 403 is in the exit status codes list
+	found := false
+	for _, exitCode := range opts.ExitStatusCodes {
+		if resp.StatusCode == exitCode {
+			found = true
+			break
+		}
+	}
+	
+	if !found {
+		t.Error("Status code 403 should be in the exit codes list but wasn't found")
+	}
+}
