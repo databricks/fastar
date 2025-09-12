@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"net/url"
@@ -58,15 +59,44 @@ const (
 	Lz4
 )
 
+// filterUnknownFlags separates unknown flags from clean arguments
+func filterUnknownFlags(args []string) (cleanArgs []string, unknownFlags []string) {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			unknownFlags = append(unknownFlags, arg)
+		} else {
+			cleanArgs = append(cleanArgs, arg)
+		}
+	}
+	return cleanArgs, unknownFlags
+}
+
 func main() {
 	var parser = flags.NewParser(&opts, flags.HelpFlag|flags.IgnoreUnknown)
 	args, err := parser.Parse()
 	if err != nil {
+		// Handle help requests - go-flags writes help automatically when there's an error
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+			// Print the error (which contains the help message) and exit
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(0)
+		}
+		// With IgnoreUnknown, we shouldn't get unknown flag errors, but handle other parsing errors
 		log.Fatal("Failed to parse arguments: ", err)
 	}
-	if len(args) == 0 {
+	
+	// Filter out likely unknown flags from positional arguments and warn about them
+	cleanArgs, unknownFlags := filterUnknownFlags(args)
+	
+	if len(unknownFlags) > 0 {
+		log.Printf("Warning: Unknown arguments will be ignored: %v", unknownFlags)
+	}
+	
+	if len(cleanArgs) == 0 {
 		log.Fatal("Please pass source URL to download file from")
 	}
+	
+	args = cleanArgs
 	var rawUrl = args[0]
 	processMinSpeedFlag()
 	opts.ChunkSize *= 1e6 // Convert chunk size from MB to B
