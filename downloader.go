@@ -206,7 +206,7 @@ func writePartial(
 	var lastLogTime = time.Now()
 
 	// Read data off the wire and into an in memory buffer to greedily
-	// force the chunk to be read. Otherwise we'd still be
+	// force the chunk to be read. Otherwise, we'd still be
 	// bottlenecked by resp.Body.Read() when copying to stdout.
 	var buf = make([]byte, chunkSize)
 

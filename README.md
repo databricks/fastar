@@ -52,7 +52,7 @@ T1 starts immediately writing to stdout while T2-T4 save to an in-memory buffer 
 ## Multithreaded tar extraction
 One final area for improvement is in the extraction of files from the final stream to the filesystem.
 Many people assume that storage is always slower than the cpu, however this isn't always the case.
-NVME ssds are often fast enough that the tar binary is actually the bottleneck when extracting data.
+NVMe ssds are often fast enough that the tar binary is actually the bottleneck when extracting data.
 Since tar extraction run in a single threaded hot loop, with fast storage this can actually become a bottleneck.
 
 To get around this, fastar has an option to do the file extraction internally (call `fastar -C` instead of piping to tar).

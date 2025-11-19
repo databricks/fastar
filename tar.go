@@ -113,13 +113,13 @@ func ExtractTar(stream io.Reader) {
 		default:
 			if opts.IgnoreNodeFiles {
 				log.Println(
-					"ExtractTarGz: uknown type:",
+					"ExtractTarGz: unknown type:",
 					string(header.Typeflag),
 					" in ",
 					header.Name)
 			} else {
 				log.Fatal(
-					"ExtractTarGz: uknown type:",
+					"ExtractTarGz: unknown type:",
 					string(header.Typeflag),
 					" in ",
 					header.Name)
@@ -130,7 +130,7 @@ func ExtractTar(stream io.Reader) {
 			lastLog = time.Now()
 		}
 	}
-	// Wait for all threads to finish, otherwise fastar
+	// Wait for all threads to finish; otherwise, fastar
 	// might exit before last few files done writing.
 	wg.Wait()
 }

@@ -70,7 +70,7 @@ func (gcsDownloader GCSDownloader) GetRanges(ranges [][]int64) (*multipart.Reade
 	return nil, errors.New("multipart range requests not supported by GCS")
 }
 
-// If err is nil, this is a noop. Otherwise the method will print an appropirate error message
+// If err is nil, this is a noop. Otherwise, the method will print an appropriate error message
 // and exit with the appropriate error code.
 func handleGcsError(err error, requestType string) {
 	if err != nil {
