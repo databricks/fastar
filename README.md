@@ -78,3 +78,20 @@ Download + decompress + extract to ramFS (`wget | tar` vs `aria2c && tar` vs `fa
 |wget+tar|aria2c+tar|fastar+tar|fastar|
 ---|---|---|---
 |16.78s|13.38s|11.02s|6.41s|
+
+## Benchmarks
+
+All run against a local fake object store, unthrottled (`local`) and with simulated S3 latency and per-connection bandwidth (`s3like`):
+
+- `BenchmarkDownload`: download only, 128 MiB; reports MB/s and connections opened per download.
+- `BenchmarkFastar`: the whole CLI pipeline (download, decompress, extract) for `.tar`, `.tar.gz` and `.tar.lz4`; reports MB/s of extracted data.
+- `BenchmarkExtractLargeFile`: extraction of one 512 MiB file, buffered and streamed.
+
+To compare a change against `master`:
+
+```
+go test -run '^$' -bench . -count 10 > new.txt   # repeat on master into old.txt
+benchstat old.txt new.txt   # go install golang.org/x/perf/cmd/benchstat@latest
+```
+
+`local` results are noisy on a laptop: confidence intervals reached ±22%, and a benchmark moved 5% between sessions with no change to the code it measures, so treat `local` differences under about 5% as noise. `s3like` confidence intervals stayed within ±3%.
