@@ -9,6 +9,10 @@ import (
 	"mime/multipart"
 )
 
+// Percentage of reads that fail on purpose under go test, to exercise retries.
+// The HTTP tests and benchmark set it to 0.
+var testReadFailPercent = 95
+
 // Helper struct to abstract away the complexity of single vs multi part
 // range requests.
 //
@@ -70,8 +74,8 @@ func (r *Reader) RequestChunk() {
 }
 
 func (r *Reader) Read(d []byte) (int, error) {
-	if flag.Lookup("test.v") != nil && rand.Intn(100) < 95 {
-		// We're running as part of a unit test, randomly fail read calls 95% of the time
+	if flag.Lookup("test.v") != nil && rand.Intn(100) < testReadFailPercent {
+		// We're running as part of a unit test, randomly fail some read calls
 		return 0, errors.New("forced read fail for testing")
 	}
 	if r.UseMultipart() {

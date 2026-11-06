@@ -115,23 +115,7 @@ func main() {
 	log.Printf("Chunk Size (Mib): %d", opts.ChunkSize/1e6)
 	log.Printf("Num Disk Workers: %d", opts.WriteWorkers)
 
-	magicNumber, splicedStream := getMagicNumber(fileStream)
-
-	compressionType := getCompressionType(filename, magicNumber)
-
-	var finalStream io.Reader
-	if compressionType == Lz4 {
-		finalStream = lz4.NewReader(splicedStream)
-	} else if compressionType == Gzip {
-		finalStream, err = gzip.NewReader(splicedStream)
-		if err != nil {
-			log.Fatal("Error creating gzip stream: ", err.Error())
-		}
-	} else if compressionType == Tar {
-		finalStream = splicedStream
-	} else {
-		log.Fatal("CompressionType not set, should be impossible")
-	}
+	finalStream := decompress(fileStream, filename)
 
 	if opts.ToStdout {
 		if _, err := io.Copy(os.Stdout, finalStream); err != nil {
@@ -145,6 +129,27 @@ func main() {
 		}
 		ExtractTar(finalStream)
 	}
+}
+
+// Returns the tar stream inside stream, decompressing it if needed.
+func decompress(stream io.Reader, filename string) io.Reader {
+	magicNumber, splicedStream := getMagicNumber(stream)
+
+	compressionType := getCompressionType(filename, magicNumber)
+
+	if compressionType == Lz4 {
+		return lz4.NewReader(splicedStream)
+	} else if compressionType == Gzip {
+		finalStream, err := gzip.NewReader(splicedStream)
+		if err != nil {
+			log.Fatal("Error creating gzip stream: ", err.Error())
+		}
+		return finalStream
+	} else if compressionType == Tar {
+		return splicedStream
+	}
+	log.Fatal("CompressionType not set, should be impossible")
+	return nil
 }
 
 // Reads first few bytes from file stream to get any possible
