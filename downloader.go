@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -191,7 +192,6 @@ func writePartial(
 	curChan chan bool,
 	nextChan chan bool) {
 
-	var err error
 	var workerNum = start / chunkSize
 
 	var reader = NewReader(size, start, chunkSize, numWorkers, supportsMultipart, downloader)
@@ -218,14 +218,20 @@ func writePartial(
 			attemptNumber = 1
 		}
 
+		// Written only by the network goroutine; the write loop below reads it with atomic.LoadInt64.
 		var totalReadForChunk = int64(0)
 		var totalWrittenForChunk = int64(0)
 
 		// Used by reader thread to tell writer there's more data it can pipe out
 		var moreToWrite = make(chan bool, 1)
+		// Closed when the network goroutine is done with reader and the worker stats,
+		// so the loop can advance reader to the next chunk without racing it.
+		var chunkDone = make(chan struct{})
 
 		// Async thread to read off the network into in memory buffer
 		go func() {
+			defer close(chunkDone)
+			var err error
 			// Time spent downloading chunk not including current attempt
 			var chunkElapsedMilli = float64(0)
 			// Time spent on this attempt downloading chunk
@@ -235,9 +241,6 @@ func writePartial(
 				return chunkElapsedMilli + float64(time.Since(attemptStartTime).Milliseconds())
 			}
 			for {
-				if totalReadForChunk > totalWrittenForChunk && len(moreToWrite) == 0 {
-					moreToWrite <- true
-				}
 				var read int
 				// We explicitly use Read() rather than ReadAll() as this lets us use
 				// a static buffer of our choosing. ReadAll() allocates a new buffer
@@ -246,8 +249,15 @@ func writePartial(
 				// MITM ReadAll().
 				read, err = reader.Read(buf[totalReadForChunk:])
 				totalReadForAttempt += float64(read)
-				totalReadForChunk += int64(read)
 				totalReadForWorker += float64(read)
+				if read > 0 {
+					atomic.StoreInt64(&totalReadForChunk, totalReadForChunk+int64(read))
+					// Non-blocking: a pending token already wakes the write loop, which then reloads the count.
+					select {
+					case moreToWrite <- true:
+					default:
+					}
+				}
 
 				// Make sure to handle bytes read before error handling, Read() can return successful bytes and error in the same call.
 				if ChunkFinished(reader.CurChunkStart, totalReadForChunk, size, chunkSize) {
@@ -287,7 +297,6 @@ func writePartial(
 				}
 			}
 			timeDownloadingMilli += timeSpentOnChunk()
-			moreToWrite <- true
 		}()
 
 		// wait for our turn to write to shared pipe
@@ -295,9 +304,10 @@ func writePartial(
 
 		// Logic to write our current chunk
 		for !ChunkFinished(reader.CurChunkStart, totalWrittenForChunk, size, chunkSize) {
-			if ChunkFinished(reader.CurChunkStart, totalReadForChunk, size, chunkSize) {
+			var readSoFar = atomic.LoadInt64(&totalReadForChunk)
+			if ChunkFinished(reader.CurChunkStart, readSoFar, size, chunkSize) {
 				// This worker has read its entire chunk off the wire, pipe the rest to writer in a single call
-				if written, err := io.Copy(writer, bytes.NewReader(buf[totalWrittenForChunk:totalReadForChunk])); err != nil {
+				if written, err := io.Copy(writer, bytes.NewReader(buf[totalWrittenForChunk:readSoFar])); err != nil {
 					log.Fatal("io copy failed:", err.Error())
 				} else {
 					totalWrittenForChunk += int64(written)
@@ -308,12 +318,20 @@ func writePartial(
 				// Avoid spinning until there's something to write, wait for reader thread to
 				// tell us it has something.
 				<-moreToWrite
-				if written, err := writer.Write(buf[totalWrittenForChunk:totalReadForChunk]); err != nil {
+				readSoFar = atomic.LoadInt64(&totalReadForChunk)
+				if written, err := writer.Write(buf[totalWrittenForChunk:readSoFar]); err != nil {
 					log.Fatal("partial write failed:", err.Error())
 				} else {
 					totalWrittenForChunk += int64(written)
 				}
 			}
+		}
+
+		<-chunkDone
+		// Log before handing on the token: the last worker closes the pipe, after which
+		// the consumer may finish and exit before a later log line is printed.
+		if reader.CurChunkStart+chunkSize*int64(numWorkers) >= size {
+			log.Printf("Worker %d final download speed %.3fMBps\n", workerNum, totalReadForWorker/1e3/timeDownloadingMilli)
 		}
 
 		// Trigger next worker to start writing to stdout.
@@ -327,5 +345,4 @@ func writePartial(
 		}
 		reader.AdvanceNextChunk()
 	}
-	log.Printf("Worker %d final download speed %.3fMBps\n", workerNum, totalReadForWorker/1e3/timeDownloadingMilli)
 }

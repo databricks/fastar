@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 )
@@ -323,5 +324,28 @@ func TestHttpExitStatusCodesIntegration(t *testing.T) {
 	
 	if !found {
 		t.Error("Status code 403 should be in the exit codes list but wasn't found")
+	}
+}
+
+// Every worker must log its final speed before the stream ends: the process exits
+// soon after the consumer reads EOF, so a later log line would be lost.
+func TestFinalSpeedLoggedBeforeEOF(t *testing.T) {
+	opts.RetryCount = math.MaxInt64
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+
+	const numWorkers = 4
+	data := RandomString(100)
+	for _, multipart := range []bool{false, true} {
+		logs.Reset()
+		// 100 bytes in chunks of 10: every worker has at least two chunks.
+		got, err := io.ReadAll(GetDownloadStream(TestDownloader{data, true, multipart}, 10, numWorkers))
+		if err != nil || string(got) != data {
+			t.Fatalf("multipart=%v: wrong data or error %v", multipart, err)
+		}
+		if n := strings.Count(logs.String(), "final download speed"); n != numWorkers {
+			t.Fatalf("multipart=%v: %d final speed lines before EOF, want %d", multipart, n, numWorkers)
+		}
 	}
 }
