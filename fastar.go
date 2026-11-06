@@ -23,6 +23,7 @@ var opts struct {
 	OutputDir       string            `long:"directory" short:"C" description:"Directory to extract tarball to. Defaults to current dir if not specified"`
 	ToStdout        bool              `long:"to-stdout" short:"O" description:"Dump downloaded file to stdout rather than extracting to disk"`
 	WriteWorkers    int               `long:"write-workers" default:"8" description:"How many parallel workers to use to write file to disk"`
+	MaxBufferSize   int64             `long:"max-buffer-size" default:"64" description:"Files up to this size (in MB) are read into memory and written by a background worker; larger files are streamed to disk, so peak memory is about write-workers x this size"`
 	StripComponents int               `long:"strip-components" description:"Strip STRIP-COMPONENTS leading components from file names on extraction"`
 	Compression     string            `long:"compression" choice:"tar" choice:"gzip" choice:"lz4" description:"Force specific compression schema instead of inferring from magic bytes or filename extension"`
 	RetryCount      int               `long:"retry-count" default:"4" description:"Max number of retries for a single chunk (exponential backoff starting at --retry-wait seconds)"`
@@ -99,7 +100,8 @@ func main() {
 	args = cleanArgs
 	var rawUrl = args[0]
 	processMinSpeedFlag()
-	opts.ChunkSize *= 1e6 // Convert chunk size from MB to B
+	opts.ChunkSize *= 1e6     // Convert chunk size from MB to B
+	opts.MaxBufferSize *= 1e6 // Convert max buffer size from MB to B
 	fileStream := GetDownloadStream(GetDownloader(rawUrl, opts.UseFips, opts.UseGetForSize), opts.ChunkSize, opts.NumWorkers)
 
 	url, err := url.Parse(rawUrl)

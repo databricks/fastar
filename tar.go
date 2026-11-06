@@ -80,6 +80,10 @@ func ExtractTar(stream io.Reader) {
 			os.Chmod(path, info.Mode())
 			os.Chown(path, header.Uid, header.Gid)
 		case tar.TypeReg:
+			if info.Size() > opts.MaxBufferSize {
+				streamFile(path, tarReader, header, &wg)
+				break
+			}
 			// Read file contents into a buffer to pass along to background
 			// writer thread.
 			buf := make([]byte, info.Size())
@@ -93,7 +97,7 @@ func ExtractTar(stream io.Reader) {
 			}
 			<-openFileTokens
 			wg.Add(1)
-			go writeFileAsync(path, buf, header, &wg)
+			go writeFileAsync(path, bytes.NewReader(buf), header, &wg, nil)
 		case tar.TypeLink:
 			newPath := filepath.Join(opts.OutputDir, linkName)
 			hardLink(newPath, path, header, &wg)
@@ -135,7 +139,48 @@ func ExtractTar(stream io.Reader) {
 	wg.Wait()
 }
 
-func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.WaitGroup) {
+// streamChunkSize is the hand-off unit between the tar reader and a file's writer:
+// large enough for efficient writes, small enough that memory stays flat per file.
+const streamChunkSize = 8 << 20
+
+// streamFile writes a file larger than --max-buffer-size without holding it in memory.
+// The caller's loop reads and decompresses the next chunk while a background worker
+// writes the previous one, so memory is 2 x streamChunkSize regardless of file size.
+func streamFile(path string, src io.Reader, header *tar.Header, wg *sync.WaitGroup) {
+	pr, pw := io.Pipe()
+	<-openFileTokens
+	wg.Add(1)
+	go writeFileAsync(path, pr, header, wg, make([]byte, streamChunkSize))
+
+	buf := make([]byte, streamChunkSize)
+	var total int64
+	for {
+		n, err := io.ReadFull(src, buf)
+		total += int64(n)
+		if n > 0 {
+			if _, werr := pw.Write(buf[:n]); werr != nil {
+				log.Fatal("Failed to stream file: ", werr.Error())
+			}
+		}
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break
+		}
+		if err != nil {
+			log.Fatal("Failed to read from resp:", err.Error())
+		}
+	}
+	// tar.Reader reports a truncated entry as an early EOF; don't leave a short file behind silently.
+	if total != header.Size {
+		log.Fatalf("Truncated archive: %s has %d of %d bytes", header.Name, total, header.Size)
+	}
+	pw.Close()
+}
+
+// writerOnly hides *os.File's ReadFrom, which would ignore copyBuf and copy a pipe
+// in 32 KiB pieces (os.genericReadFrom).
+type writerOnly struct{ io.Writer }
+
+func writeFileAsync(filename string, src io.Reader, header *tar.Header, wg *sync.WaitGroup, copyBuf []byte) {
 	defer wg.Done()
 	defer func() { openFileTokens <- true }()
 	var writeStartTime = time.Now()
@@ -151,11 +196,11 @@ func writeFileAsync(filename string, buf []byte, header *tar.Header, wg *sync.Wa
 	defer os.Chmod(filename, header.FileInfo().Mode())
 	defer os.Chown(filename, header.Uid, header.Gid)
 	defer file.Close()
-	_, err = io.Copy(file, bytes.NewReader(buf))
+	written, err := io.CopyBuffer(writerOnly{file}, src, copyBuf)
 	if err != nil {
 		log.Fatal("Copy file failed: ", err.Error())
 	}
-	bytesWritten.Add((uint64)(len(buf)))
+	bytesWritten.Add((uint64)(written))
 	writeTimeMilli.Add(uint64(time.Since(writeStartTime).Milliseconds()))
 }
 
